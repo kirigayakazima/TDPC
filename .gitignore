@@ -22,6 +22,8 @@ tools/
 *.tmp
 *.bak
 *.cache
+*.jpg
+*.jpeg
 
 ## OS files
 Thumbs.db
