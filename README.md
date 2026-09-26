@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <b>专为机械革命蛟龙 / 同方模具游戏本打造的轻量级、原生独立硬件控制台</b><br>
+  <b>专为机械革命蛟龙系列（宝龙达 / Bitland 模具，如 2023 款蛟龙 16 Pro 等）打造的轻量级、原生独立硬件控制台</b><br>
   <i>彻底告别臃肿的原厂控制软件 · 零第三方依赖 · 原生 WPF 流畅极客体验</i>
 </p>
 
@@ -20,9 +20,9 @@
 
 ## 💡 项目初衷
 
-华硕玩家有 **G-Helper**，联想玩家有 **Legion Toolkit**。而同方 / 机械革命玩家长期受制于原厂控制中心体积庞大、开机自启拖慢系统、资源占用高、缺乏自定义风扇曲线和 CPU 降压（Curve Optimizer）等痛点。
+华硕玩家有 **G-Helper**，联想玩家有 **Legion Toolkit**。而机械革命蛟龙玩家（尤其是采用宝龙达模具的 2023 款蛟龙 16 Pro 等机型）长期受制于原厂控制中心体积庞大、开机自启拖慢系统、资源占用高、缺乏自定义风扇曲线和 CPU 降压（Curve Optimizer）等痛点。
 
-**TDPC (Tongfang / Jiaolong Dragon Performance Control)** 应运而生。它是一个完全从零手写实现的轻量级开源替代方案，直连硬件底层，不依赖原厂服务，内存占用仅约 40MB，提供纯粹、自由、高效的硬件调节体验。
+**TDPC (The Dragon Performance Control / 蛟龙性能控制台)** 应运而生。它是一个完全从零手写实现的轻量级开源替代方案，直连硬件底层，不依赖原厂服务，内存占用仅约 40MB，提供纯粹、自由、高效的硬件调节体验。
 
 ---
 
@@ -59,8 +59,10 @@
   - CPU: AMD Ryzen 7 7745HX (Zen4 Dragon Range)
   - GPU: NVIDIA GeForce RTX 4070 Laptop (140W)
   - BIOS 版本: `MRID6_23_P_V35`
-- **机型拓展**：
-  同方模具（包括机械革命蛟龙/旷世/极光系列、德国 XMG、Schenker、Eluktronics 等品牌同模具机型）多采用通用 EC 与 WMI 规范，欢迎更多机型用户测试并提交适配数据！
+- **硬件与代工模具背景**：
+  - **宝龙达 (Bitland)** 模具与主板设计：2023 款机械革命蛟龙 16 Pro 采用宝龙达代工主板（内部项目代号 MRID6，BIOS 格式如 `MRID6_23_P_V35`）。
+  - 其嵌入式控制器（EC）、WMI 协议接口（`MICommonInterface` / `MIFS_0`）以及 AMD Dragon Range 平台的 SMU 邮箱深度定制。
+  - 本项目完全基于该宝龙达机型的真实硬件行为逆向与重构，欢迎同类宝龙达模具或机械革命笔记本用户测试并提交适配数据！
 
 ---
 
@@ -107,7 +109,7 @@ dotnet publish src/Jiaolong.App/Jiaolong.App.csproj -c Release -o publish
 
 ## ⚠️ 免责声明 (Disclaimer)
 
-1. 本项目为独立开源软件，与清华同方（Tongfang）、机械革命（MECHREVO）或 AMD、NVIDIA 等品牌官方无任何隶属或背书关系。
+1. 本项目为独立开源软件，与机械革命（MECHREVO）、宝龙达（Bitland）或 AMD、NVIDIA 等品牌官方无任何隶属或背书关系。
 2. 软件涉及嵌入式控制器（EC）读写、CPU 电源策略调整与降压超频（Curve Optimizer）。开发者已在程序中部署了高温自动切回 BIOS 的保护看门狗，但仍不对因任何超频不稳定、散热失控、硬件磨损或数据丢失承担责任。
 3. 请根据自身笔记本散热状况合理配置温控曲线与降压幅度。若遇系统蓝屏（BSOD），重启后在控制台重置为默认值即可。
 
