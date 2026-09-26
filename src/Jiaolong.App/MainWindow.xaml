@@ -465,6 +465,19 @@
                         <TextBlock x:Name="OwnerPill" Text="启动中…" FontWeight="SemiBold"
                                    Foreground="{DynamicResource Warn}" FontSize="11.5" />
                     </Border>
+
+                    <!-- Version & Update Badge -->
+                    <Border x:Name="VersionBadge" Margin="10,0,0,0" Background="{DynamicResource PillBg}" CornerRadius="11"
+                            Padding="10,4" BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1"
+                            VerticalAlignment="Center" Cursor="Hand" MouseLeftButtonUp="VersionBadge_Click"
+                            ToolTip="点击检查更新">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse x:Name="UpdateDot" Width="6" Height="6" Fill="{DynamicResource SubtitleText}"
+                                     Margin="0,0,6,0" VerticalAlignment="Center" />
+                            <TextBlock x:Name="VersionText" Text="v1.0.0" FontSize="11" FontWeight="SemiBold"
+                                       Foreground="{DynamicResource SubtitleText}" VerticalAlignment="Center" />
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
 
                 <!-- Right Caption Controls -->
@@ -1174,6 +1187,62 @@
                         </Border>
                     </Grid>
                 </ScrollViewer>
+            </Grid>
+
+            <!-- ================= UPDATE DIALOG MODAL ================= -->
+            <Grid x:Name="UpdateModal" Grid.RowSpan="3" Visibility="Collapsed" Background="#B0000000">
+                <Border Width="500" HorizontalAlignment="Center" VerticalAlignment="Center"
+                        Style="{StaticResource Card}" Background="{DynamicResource CardBg}"
+                        Padding="26" CornerRadius="18">
+                    <Border.Effect>
+                        <DropShadowEffect BlurRadius="36" Color="#00F0FF" Opacity="0.35" ShadowDepth="0" />
+                    </Border.Effect>
+                    <StackPanel>
+                        <!-- Title -->
+                        <DockPanel Margin="0,0,0,14">
+                            <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
+                                <Border Width="34" Height="34" CornerRadius="10" Background="#2000F0FF" Margin="0,0,12,0">
+                                    <TextBlock Text="🚀" FontSize="17" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                </Border>
+                                <StackPanel VerticalAlignment="Center">
+                                    <TextBlock Text="发现全新版本" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource TitleText}" />
+                                    <TextBlock x:Name="UpdateVersionSubtitle" Text="v1.0.0 ➔ v1.0.1" FontSize="11.5" Foreground="{DynamicResource SubtitleText}" Margin="0,2,0,0" />
+                                </StackPanel>
+                            </StackPanel>
+                            <Button Style="{StaticResource CaptionClose}" Width="28" Height="28" Click="UpdateModalClose_Click" DockPanel.Dock="Right">
+                                <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="10" Text="&#xE8BB;" />
+                            </Button>
+                        </DockPanel>
+
+                        <!-- Release Title / Notes -->
+                        <TextBlock Text="更新日志：" FontSize="11.5" FontWeight="SemiBold" Foreground="{DynamicResource SubtitleText}" Margin="0,0,0,6" />
+                        <Border Style="{StaticResource SubPanel}" MaxHeight="190" Padding="14,12" Margin="0,0,0,16">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <TextBlock x:Name="UpdateNotesText" TextWrapping="Wrap" FontSize="12" LineHeight="19"
+                                           Foreground="{DynamicResource NumText}" />
+                            </ScrollViewer>
+                        </Border>
+
+                        <!-- Download Progress (shown during downloading) -->
+                        <StackPanel x:Name="UpdateProgressPanel" Visibility="Collapsed" Margin="0,0,0,16">
+                            <DockPanel Margin="0,0,0,6">
+                                <TextBlock x:Name="UpdateProgressStatus" Text="正在下载更新包..." FontSize="11.5" Foreground="{DynamicResource TitleText}" DockPanel.Dock="Left" />
+                                <TextBlock x:Name="UpdateProgressPct" Text="0%" FontFamily="Consolas" FontSize="11.5" Foreground="{DynamicResource AccentBrush}" DockPanel.Dock="Right" HorizontalAlignment="Right" />
+                            </DockPanel>
+                            <ProgressBar x:Name="UpdateProgressBar" Height="6" Maximum="100" Value="0"
+                                         Foreground="{DynamicResource AccentBrush}" Background="{DynamicResource PanelBg}" BorderThickness="0" />
+                        </StackPanel>
+
+                        <!-- Actions -->
+                        <DockPanel LastChildFill="False">
+                            <Button Style="{StaticResource Btn}" Content="🌐 浏览器下载" Click="UpdateBrowser_Click" DockPanel.Dock="Left" Padding="12,8" />
+                            <StackPanel Orientation="Horizontal" DockPanel.Dock="Right">
+                                <Button x:Name="UpdateCancelBtn" Style="{StaticResource Btn}" Content="稍后再说" Click="UpdateModalClose_Click" Margin="0,0,8,0" Padding="14,8" />
+                                <Button x:Name="UpdateApplyBtn" Style="{StaticResource PrimaryBtn}" Content="⚡ 立即更新并重启" Click="UpdateApply_Click" Padding="16,8" />
+                            </StackPanel>
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
             </Grid>
         </Grid>
     </Grid>

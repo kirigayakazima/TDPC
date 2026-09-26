@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using System.Windows;
@@ -29,6 +30,7 @@ public partial class MainWindow : Window
     private SensorHub? _sensors;
     private TrayService? _tray;
     private bool _forceClose;
+    private UpdateInfo? _latestUpdate;
 
     private DispatcherTimer? _applyTimer;   // slider debounce
     private OsdOverlay? _osd;
@@ -291,6 +293,10 @@ public partial class MainWindow : Window
 
         _lastSavedJson = JsonSerializer.Serialize(_cfg);
         AddEvent($"已载入配置 {ConfigStore.FilePath}");
+
+        // Version & background update check
+        VersionText.Text = UpdateService.CurrentVersionString;
+        _ = Task.Run(() => CheckUpdateInBackgroundAsync());
     }
 
     /// <summary>Mirrors the live UI into <see cref="_cfg"/> and writes it when anything changed.</summary>
@@ -1461,5 +1467,131 @@ public partial class MainWindow : Window
     {
         _forceClose = true;
         Close();
+    }
+
+    // ================================================================ auto-update & version check
+    private async Task CheckUpdateInBackgroundAsync()
+    {
+        try
+        {
+            var info = await UpdateService.CheckForUpdateAsync();
+            if (info?.HasUpdate == true)
+            {
+                _latestUpdate = info;
+                Dispatcher.Invoke(() =>
+                {
+                    UpdateDot.Fill = new SolidColorBrush(Color.FromRgb(0, 230, 118));
+                    VersionText.Text = $"{UpdateService.CurrentVersionString} (新版本)";
+                    VersionBadge.ToolTip = $"发现新版本 {info.LatestVersionStr}！点击查看并更新";
+                    AddEvent($"[更新提示] 发现新版本 {info.LatestVersionStr}，点击顶部版本号即可一键升级");
+                });
+            }
+        }
+        catch { /* silent background check */ }
+    }
+
+    private async void VersionBadge_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (_latestUpdate?.HasUpdate == true)
+        {
+            ShowUpdateModal(_latestUpdate);
+            return;
+        }
+
+        VersionText.Text = "检查中…";
+        try
+        {
+            var info = await UpdateService.CheckForUpdateAsync();
+            if (info?.HasUpdate == true)
+            {
+                _latestUpdate = info;
+                UpdateDot.Fill = new SolidColorBrush(Color.FromRgb(0, 230, 118));
+                VersionText.Text = $"{UpdateService.CurrentVersionString} (新版本)";
+                VersionBadge.ToolTip = $"发现新版本 {info.LatestVersionStr}！点击更新";
+                ShowUpdateModal(info);
+            }
+            else
+            {
+                VersionText.Text = UpdateService.CurrentVersionString;
+                Toast($"已是最新版本 ({UpdateService.CurrentVersionString})");
+                AddEvent($"[更新检查] 当前已是最新版本 ({UpdateService.CurrentVersionString})");
+            }
+        }
+        catch (Exception ex)
+        {
+            VersionText.Text = UpdateService.CurrentVersionString;
+            Toast("检查更新超时，请稍后重试");
+            AddEvent($"[更新检查失败] {ex.Message}");
+        }
+    }
+
+    private void ShowUpdateModal(UpdateInfo info)
+    {
+        UpdateVersionSubtitle.Text = $"{info.CurrentVersionStr}  ➔  {info.LatestVersionStr} (最新)";
+        UpdateNotesText.Text = string.IsNullOrWhiteSpace(info.ReleaseNotes)
+            ? "包含最新性能优化与稳定性更新。"
+            : info.ReleaseNotes;
+        UpdateProgressPanel.Visibility = Visibility.Collapsed;
+        UpdateProgressBar.Value = 0;
+        UpdateProgressPct.Text = "0%";
+        UpdateApplyBtn.IsEnabled = true;
+        UpdateCancelBtn.IsEnabled = true;
+        UpdateModal.Visibility = Visibility.Visible;
+    }
+
+    private void UpdateModalClose_Click(object sender, RoutedEventArgs e)
+    {
+        UpdateModal.Visibility = Visibility.Collapsed;
+    }
+
+    private void UpdateBrowser_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = "https://github.com/kirigayakazima/TDPC/releases/latest",
+                UseShellExecute = true
+            });
+        }
+        catch { }
+    }
+
+    private async void UpdateApply_Click(object sender, RoutedEventArgs e)
+    {
+        if (_latestUpdate == null || string.IsNullOrEmpty(_latestUpdate.DownloadUrl))
+        {
+            Toast("未找到可用下载链接");
+            return;
+        }
+
+        UpdateApplyBtn.IsEnabled = false;
+        UpdateCancelBtn.IsEnabled = false;
+        UpdateProgressPanel.Visibility = Visibility.Visible;
+        UpdateProgressStatus.Text = "正在下载更新包 (290 KB)...";
+
+        var progress = new Progress<double>(pct =>
+        {
+            UpdateProgressBar.Value = pct;
+            UpdateProgressPct.Text = $"{pct:F0}%";
+            if (pct >= 100)
+            {
+                UpdateProgressStatus.Text = "下载解压完毕，正在重启升级...";
+            }
+        });
+
+        try
+        {
+            AddEvent($"[在线更新] 开始下载 {_latestUpdate.LatestVersionStr}...");
+            await UpdateService.DownloadAndApplyUpdateAsync(_latestUpdate, progress);
+        }
+        catch (Exception ex)
+        {
+            Toast("更新失败：" + ex.Message);
+            AddEvent($"[在线更新失败] {ex.Message}");
+            UpdateProgressPanel.Visibility = Visibility.Collapsed;
+            UpdateApplyBtn.IsEnabled = true;
+            UpdateCancelBtn.IsEnabled = true;
+        }
     }
 }
