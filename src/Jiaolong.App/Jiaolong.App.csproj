@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>TDPC</AssemblyName>
+    <RootNamespace>Jiaolong.App</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <AssemblyTitle>TDPC - Jiaolong Dragon Performance Control</AssemblyTitle>
+    <Product>TDPC</Product>
+    <Version>0.1.0</Version>
+    <ApplicationIcon>Assets\app.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Resource Include="Assets\app.ico" />
+    <Resource Include="Assets\app.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Jiaolong.Core\Jiaolong.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- runtime dependencies, no NuGet -->
+    <None Include="..\vendor\WinRing0x64.dll" Link="WinRing0x64.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\vendor\WinRing0x64.sys" Link="WinRing0x64.sys" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\Jiaolong.Core\Wmi\WmiBridge.ps1" Link="WmiBridge.ps1" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

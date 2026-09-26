@@ -1,0 +1,33 @@
+## Build & Output directories
+[Bb]in/
+[Oo]bj/
+publish/
+
+## Exclude reverse engineering & local development tools per user configuration
+decompile/
+docs/
+tools/
+
+## Visual Studio / VS Code / JetBrains
+.vs/
+.idea/
+.vscode/
+*.user
+*.userosscache
+*.suo
+*.sln.docstates
+
+## Temporary & Log files
+*.log
+*.tmp
+*.bak
+*.cache
+
+## OS files
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+## Explicitly track vendor Ring-0 driver binaries
+!src/vendor/WinRing0x64.dll
+!src/vendor/WinRing0x64.sys

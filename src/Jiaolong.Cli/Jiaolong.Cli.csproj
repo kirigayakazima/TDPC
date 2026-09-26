@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>jiatool</AssemblyName>
+    <RootNamespace>Jiaolong.Cli</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Jiaolong.Core\Jiaolong.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- WinRing0 / OpenLibSys driver binaries (signed) -->
+    <None Include="..\vendor\WinRing0x64.dll" Link="WinRing0x64.dll" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\vendor\WinRing0x64.sys" Link="WinRing0x64.sys" CopyToOutputDirectory="PreserveNewest" />
+    <!-- Persistent System.Management bridge used for the WMI transport -->
+    <None Include="..\Jiaolong.Core\Wmi\WmiBridge.ps1" Link="WmiBridge.ps1" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

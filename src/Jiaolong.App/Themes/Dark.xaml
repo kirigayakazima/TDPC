@@ -1,0 +1,106 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ==========================================================
+         深邃液态黑 · liquid-glass design tokens
+         ========================================================== -->
+
+    <LinearGradientBrush x:Key="BackdropBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#FF0B101B" Offset="0" />
+        <GradientStop Color="#FF121A2B" Offset="0.5" />
+        <GradientStop Color="#FF090D17" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- card body: a real liquid-glass volume with specular transmission -->
+    <LinearGradientBrush x:Key="CardBg" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#3D182236" Offset="0" />
+        <GradientStop Color="#520E1524" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- specular edge: top catches light, bottom fades out (sells authentic glass) -->
+    <LinearGradientBrush x:Key="CardBorder" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#3AFFFFFF" Offset="0" />
+        <GradientStop Color="#14FFFFFF" Offset="0.3" />
+        <GradientStop Color="#06FFFFFF" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- 1px specular line at top of cards for physical refraction -->
+    <LinearGradientBrush x:Key="GlassSpecularBrush" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Color="Transparent" Offset="0" />
+        <GradientStop Color="#40FFFFFF" Offset="0.2" />
+        <GradientStop Color="#65FFFFFF" Offset="0.5" />
+        <GradientStop Color="#40FFFFFF" Offset="0.8" />
+        <GradientStop Color="Transparent" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- nested panel inside a card: recessed gauge bay / sensor chip -->
+    <SolidColorBrush x:Key="PanelBg" Color="#1E101826" />
+    <SolidColorBrush x:Key="PanelBorder" Color="#18FFFFFF" />
+
+    <LinearGradientBrush x:Key="ControlBg" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#40141A28" Offset="0" />
+        <GradientStop Color="#520E131E" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- shadows: hardware accelerated with RenderingBias="Performance" -->
+    <DropShadowEffect x:Key="CardShadow" BlurRadius="16" ShadowDepth="4" Direction="270"
+                      RenderingBias="Performance" Color="#000000" Opacity="0.45" />
+    <DropShadowEffect x:Key="PanelShadow" BlurRadius="6" ShadowDepth="2" Direction="270"
+                      RenderingBias="Performance" Color="#000000" Opacity="0.25" />
+    <DropShadowEffect x:Key="GlowShadow" BlurRadius="12" ShadowDepth="0" Direction="0"
+                      RenderingBias="Performance" Color="#00E5FF" Opacity="0.50" />
+
+    <!-- sleek liquid scrollbar tokens -->
+    <SolidColorBrush x:Key="ScrollThumb" Color="#30FFFFFF" />
+    <SolidColorBrush x:Key="ScrollThumbHover" Color="#60FFFFFF" />
+    <SolidColorBrush x:Key="ScrollThumbActive" Color="#9900F0FF" />
+
+    <!-- typography -->
+    <SolidColorBrush x:Key="TitleText" Color="#F4F8FC" />
+    <SolidColorBrush x:Key="SubtitleText" Color="#6E8199" />
+    <SolidColorBrush x:Key="SectionText" Color="#A4B5CC" />
+    <SolidColorBrush x:Key="LabelText" Color="#8E9EAF" />
+    <SolidColorBrush x:Key="ValueText" Color="#F4F8FC" />
+    <SolidColorBrush x:Key="RowText" Color="#CDD8E5" />
+    <SolidColorBrush x:Key="EventText" Color="#8A9BB1" />
+
+    <!-- accents -->
+    <SolidColorBrush x:Key="Accent" Color="#00F0FF" />
+    <SolidColorBrush x:Key="AccentGlow" Color="#0072FF" />
+    <SolidColorBrush x:Key="Warn" Color="#FFB020" />
+    <SolidColorBrush x:Key="Danger" Color="#FF3366" />
+
+    <!-- metric palette: instrument look -->
+    <SolidColorBrush x:Key="NeonCyan" Color="#00F0FF" />
+    <SolidColorBrush x:Key="NeonBlue" Color="#388BFD" />
+    <SolidColorBrush x:Key="NeonAmber" Color="#FFB300" />
+    <SolidColorBrush x:Key="NeonEmerald" Color="#00E676" />
+    <SolidColorBrush x:Key="NeonPurple" Color="#A855F7" />
+    <SolidColorBrush x:Key="NeonRose" Color="#FF3366" />
+    <SolidColorBrush x:Key="NumText" Color="#E8F1FB" />
+
+    <LinearGradientBrush x:Key="PrimaryBtnBg" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#00E5FF" Offset="0" />
+        <GradientStop Color="#0072FF" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- controls -->
+    <SolidColorBrush x:Key="SegBg" Color="#22000000" />
+    <SolidColorBrush x:Key="SegOn" Color="#3300C6FF" />
+    <SolidColorBrush x:Key="InputBg" Color="#2E121927" />
+    <SolidColorBrush x:Key="InputBorder" Color="#2EFFFFFF" />
+    <SolidColorBrush x:Key="TrackOff" Color="#24FFFFFF" />
+    <SolidColorBrush x:Key="Thumb" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="BtnFace" Color="#181D2A" />
+    <SolidColorBrush x:Key="BtnFaceHover" Color="#252F43" />
+    <SolidColorBrush x:Key="BtnHover" Color="#18FFFFFF" />
+    <SolidColorBrush x:Key="ChartBg" Color="#0D000000" />
+    <SolidColorBrush x:Key="PillBg" Color="#18FFFFFF" />
+    <SolidColorBrush x:Key="OsdBg" Color="#CC0B1018" />
+
+    <!-- cyber keyboard preview tokens -->
+    <SolidColorBrush x:Key="KbChassisBg" Color="#2B070E1A" />
+    <SolidColorBrush x:Key="KbKeyBg" Color="#26FFFFFF" />
+    <SolidColorBrush x:Key="KbKeyBorder" Color="#18FFFFFF" />
+
+</ResourceDictionary>

@@ -1,0 +1,107 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ==========================================================
+         晶莹水晶白 · liquid-glass design tokens (light)
+         High contrast slate typography, pure crystal glass, crisp depth
+         ========================================================== -->
+
+    <LinearGradientBrush x:Key="BackdropBrush" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#FFF8FAFC" Offset="0" />
+        <GradientStop Color="#FFE2E8F0" Offset="0.5" />
+        <GradientStop Color="#FFF1F5F9" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- frosted crystal glass: clean white volume -->
+    <LinearGradientBrush x:Key="CardBg" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#FAFFFFFF" Offset="0" />
+        <GradientStop Color="#F0F8FAFC" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- crisp top specular border edge -->
+    <LinearGradientBrush x:Key="CardBorder" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#FFFFFF" Offset="0" />
+        <GradientStop Color="#CBD5E1" Offset="0.4" />
+        <GradientStop Color="#94A3B8" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- 1px specular line at top of cards for physical refraction -->
+    <LinearGradientBrush x:Key="GlassSpecularBrush" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Color="Transparent" Offset="0" />
+        <GradientStop Color="#A0FFFFFF" Offset="0.3" />
+        <GradientStop Color="#E0FFFFFF" Offset="0.5" />
+        <GradientStop Color="#A0FFFFFF" Offset="0.7" />
+        <GradientStop Color="Transparent" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- nested panel inside a card: clearly legible contrast against card surface -->
+    <SolidColorBrush x:Key="PanelBg" Color="#F1F5F9" />
+    <SolidColorBrush x:Key="PanelBorder" Color="#E2E8F0" />
+
+    <LinearGradientBrush x:Key="ControlBg" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#F8FAFC" Offset="0" />
+        <GradientStop Color="#EDF2F7" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- shadows: clean diffuse ambient shadows with RenderingBias="Performance" -->
+    <DropShadowEffect x:Key="CardShadow" BlurRadius="14" ShadowDepth="3" Direction="270"
+                      RenderingBias="Performance" Color="#0F172A" Opacity="0.06" />
+    <DropShadowEffect x:Key="PanelShadow" BlurRadius="6" ShadowDepth="1" Direction="270"
+                      RenderingBias="Performance" Color="#0F172A" Opacity="0.04" />
+    <DropShadowEffect x:Key="GlowShadow" BlurRadius="12" ShadowDepth="1" Direction="270"
+                      RenderingBias="Performance" Color="#0284C7" Opacity="0.30" />
+
+    <!-- sleek liquid scrollbar tokens -->
+    <SolidColorBrush x:Key="ScrollThumb" Color="#28000000" />
+    <SolidColorBrush x:Key="ScrollThumbHover" Color="#50000000" />
+    <SolidColorBrush x:Key="ScrollThumbActive" Color="#88000000" />
+
+    <!-- typography: high-contrast slate-900 / slate-700 / slate-600 -->
+    <SolidColorBrush x:Key="TitleText" Color="#0F172A" />
+    <SolidColorBrush x:Key="SubtitleText" Color="#475569" />
+    <SolidColorBrush x:Key="SectionText" Color="#1E293B" />
+    <SolidColorBrush x:Key="LabelText" Color="#475569" />
+    <SolidColorBrush x:Key="ValueText" Color="#0F172A" />
+    <SolidColorBrush x:Key="RowText" Color="#1E293B" />
+    <SolidColorBrush x:Key="EventText" Color="#334155" />
+
+    <!-- accents (optimized for light theme contrast) -->
+    <SolidColorBrush x:Key="Accent" Color="#0284C7" />
+    <SolidColorBrush x:Key="AccentGlow" Color="#2563EB" />
+    <SolidColorBrush x:Key="Warn" Color="#D97706" />
+    <SolidColorBrush x:Key="Danger" Color="#E11D48" />
+
+    <!-- metric palette: bold and vibrant on light background -->
+    <SolidColorBrush x:Key="NeonCyan" Color="#0284C7" />
+    <SolidColorBrush x:Key="NeonBlue" Color="#2563EB" />
+    <SolidColorBrush x:Key="NeonAmber" Color="#D97706" />
+    <SolidColorBrush x:Key="NeonEmerald" Color="#059669" />
+    <SolidColorBrush x:Key="NeonPurple" Color="#7C3AED" />
+    <SolidColorBrush x:Key="NeonRose" Color="#E11D48" />
+    <SolidColorBrush x:Key="NumText" Color="#0F172A" />
+
+    <LinearGradientBrush x:Key="PrimaryBtnBg" StartPoint="0,0" EndPoint="1,1">
+        <GradientStop Color="#0284C7" Offset="0" />
+        <GradientStop Color="#2563EB" Offset="1" />
+    </LinearGradientBrush>
+
+    <!-- controls -->
+    <SolidColorBrush x:Key="SegBg" Color="#E2E8F0" />
+    <SolidColorBrush x:Key="SegOn" Color="#2563EB" />
+    <SolidColorBrush x:Key="InputBg" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="InputBorder" Color="#CBD5E1" />
+    <SolidColorBrush x:Key="TrackOff" Color="#CBD5E1" />
+    <SolidColorBrush x:Key="Thumb" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="BtnFace" Color="#E2E8F0" />
+    <SolidColorBrush x:Key="BtnFaceHover" Color="#CBD5E1" />
+    <SolidColorBrush x:Key="BtnHover" Color="#12000000" />
+    <SolidColorBrush x:Key="ChartBg" Color="#08000010" />
+    <SolidColorBrush x:Key="PillBg" Color="#E2E8F0" />
+    <SolidColorBrush x:Key="OsdBg" Color="#F0FFFFFF" />
+
+    <!-- cyber keyboard preview tokens -->
+    <SolidColorBrush x:Key="KbChassisBg" Color="#E2E8F0" />
+    <SolidColorBrush x:Key="KbKeyBg" Color="#FFFFFF" />
+    <SolidColorBrush x:Key="KbKeyBorder" Color="#CBD5E1" />
+
+</ResourceDictionary>

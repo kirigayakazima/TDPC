@@ -1,0 +1,111 @@
+<Window x:Class="Jiaolong.App.CurveWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:shell="clr-namespace:System.Windows.Shell;assembly=PresentationFramework"
+        Title="温度曲线"
+        Width="480" Height="560"
+        WindowStyle="None" ResizeMode="NoResize"
+        Background="Transparent" FontFamily="Segoe UI" FontSize="13"
+        Foreground="{DynamicResource TitleText}"
+        WindowStartupLocation="CenterOwner" ShowInTaskbar="False">
+
+    <shell:WindowChrome.WindowChrome>
+        <shell:WindowChrome CaptionHeight="0" ResizeBorderThickness="6"
+                             GlassFrameThickness="1" CornerRadius="0"
+                             UseAeroCaptionButtons="False" />
+    </shell:WindowChrome.WindowChrome>
+
+    <Window.Resources>
+        <Style x:Key="PointBox" TargetType="TextBox">
+            <Setter Property="Background" Value="{DynamicResource InputBg}" />
+            <Setter Property="Foreground" Value="{DynamicResource ValueText}" />
+            <Setter Property="BorderBrush" Value="{DynamicResource InputBorder}" />
+            <Setter Property="CaretBrush" Value="{DynamicResource Accent}" />
+            <Setter Property="Padding" Value="6,5" />
+            <Setter Property="TextAlignment" Value="Right" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TextBox">
+                        <Border Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
+                                CornerRadius="7" Padding="{TemplateBinding Padding}">
+                            <ScrollViewer x:Name="PART_ContentHost" Margin="0" VerticalAlignment="Center" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </Window.Resources>
+
+    <Border Background="{DynamicResource InputBg}" CornerRadius="14"
+            BorderBrush="{DynamicResource CardBorder}" BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="46" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <!-- header -->
+            <DockPanel Grid.Row="0" Margin="16,0,10,0" MouseLeftButtonDown="Header_MouseLeftButtonDown">
+                <Button DockPanel.Dock="Right" Width="34" Height="30" HorizontalAlignment="Right"
+                        Background="Transparent" BorderThickness="0" Cursor="Hand"
+                        Click="Close_Click" ToolTip="关闭">
+                    <TextBlock FontFamily="Segoe MDL2 Assets" FontSize="11" Text="&#xE8BB;"
+                               Foreground="{DynamicResource RowText}" />
+                </Button>
+                <TextBlock VerticalAlignment="Center" FontWeight="SemiBold"
+                           Foreground="{DynamicResource TitleText}" Text="温度曲线" />
+            </DockPanel>
+
+            <!-- preview -->
+            <Border Grid.Row="1" Margin="16,0,16,12" CornerRadius="10"
+                    Background="{DynamicResource ChartBg}"
+                    BorderBrush="{DynamicResource CardBorder}" BorderThickness="1" Padding="8,6">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="130" />
+                    </Grid.RowDefinitions>
+                    <DockPanel Grid.Row="0" Margin="2,0,2,4">
+                        <TextBlock DockPanel.Dock="Left" FontSize="11"
+                                   Foreground="{DynamicResource SubtitleText}"
+                                   Text="预览 · 转速随温度" />
+                        <TextBlock x:Name="PreviewNote" DockPanel.Dock="Right" FontSize="11"
+                                   Foreground="{DynamicResource SubtitleText}" HorizontalAlignment="Right" />
+                    </DockPanel>
+                    <Grid Grid.Row="1">
+                        <Polyline x:Name="CurvePoly" Stroke="{DynamicResource Accent}"
+                                  StrokeThickness="2" />
+                        <Polyline x:Name="DotsPoly" Stroke="{DynamicResource Warn}"
+                                  StrokeThickness="0" />
+                    </Grid>
+                </Grid>
+            </Border>
+
+            <!-- points -->
+            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Margin="16,0,16,12">
+                <StackPanel x:Name="PointsPanel" />
+            </ScrollViewer>
+
+            <!-- footer -->
+            <DockPanel Grid.Row="3" Margin="16,0,16,16">
+                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                    <Button x:Name="ApplyBtn" Content="应用并启用" Click="Apply_Click"
+                            Padding="16,8" Cursor="Hand" FontSize="13"
+                            Background="{DynamicResource Accent}" Foreground="#FFFFFF"
+                            BorderThickness="0" />
+                    <Button x:Name="StopBtn" Content="停用曲线" Click="Stop_Click"
+                            Padding="16,8" Cursor="Hand" FontSize="13" Margin="10,0,0,0"
+                            Background="{DynamicResource BtnFace}"
+                            Foreground="{DynamicResource ValueText}"
+                            BorderBrush="{DynamicResource InputBorder}" BorderThickness="1" />
+                </StackPanel>
+                <TextBlock DockPanel.Dock="Left" FontSize="11" VerticalAlignment="Center"
+                           Foreground="{DynamicResource SubtitleText}"
+                           Text="温度须递增 · 转速 1800–5800，步进 100" />
+            </DockPanel>
+        </Grid>
+    </Border>
+</Window>

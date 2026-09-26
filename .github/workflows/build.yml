@@ -1,0 +1,52 @@
+name: Build and Release TDPC
+
+on:
+  push:
+    branches: [ master, main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ master, main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Build TDPC Solution
+        run: dotnet build TDPC.sln -c Release
+
+      - name: Publish Jiaolong.App (TDPC)
+        run: |
+          dotnet publish src/Jiaolong.App/Jiaolong.App.csproj -c Release -o publish/TDPC
+          # Remove pdb debug symbols from production packaging
+          Remove-Item -Path publish/TDPC/*.pdb -Force -ErrorAction SilentlyContinue
+
+      - name: Create Release Zip Package
+        shell: pwsh
+        run: |
+          Compress-Archive -Path publish/TDPC/* -DestinationPath publish/TDPC-win-x64.zip -Force
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TDPC-win-x64
+          path: publish/TDPC-win-x64.zip
+
+      - name: Create GitHub Release on Tag
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: publish/TDPC-win-x64.zip
+          draft: false
+          prerelease: false
+          generate_release_notes: true
