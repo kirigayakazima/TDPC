@@ -3,10 +3,10 @@
 [Oo]bj/
 publish/
 
-## Exclude reverse engineering & local development tools per user configuration
+## Local reverse engineering material and development tools
 decompile/
-docs/
 tools/
+docs/
 
 ## Visual Studio / VS Code / JetBrains
 .vs/

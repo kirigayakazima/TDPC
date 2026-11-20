@@ -12,7 +12,7 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <AssemblyTitle>TDPC - Jiaolong Dragon Performance Control</AssemblyTitle>
     <Product>TDPC</Product>
-    <Version>1.0.0</Version>
+    <Version>1.0.1</Version>
     <ApplicationIcon>Assets\app.ico</ApplicationIcon>
   </PropertyGroup>
 
@@ -27,9 +27,9 @@
 
   <ItemGroup>
     <!-- runtime dependencies, no NuGet -->
-    <None Include="..\vendor\WinRing0x64.dll" Link="WinRing0x64.dll" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\vendor\WinRing0x64.sys" Link="WinRing0x64.sys" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="..\Jiaolong.Core\Wmi\WmiBridge.ps1" Link="WmiBridge.ps1" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\vendor\WinRing0x64.dll" Link="WinRing0x64.dll" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="..\vendor\WinRing0x64.sys" Link="WinRing0x64.sys" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
+    <None Include="..\Jiaolong.Core\Wmi\WmiBridge.ps1" Link="WmiBridge.ps1" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" />
   </ItemGroup>
 
 </Project>

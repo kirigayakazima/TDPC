@@ -29,26 +29,38 @@ jobs:
 
       - name: Publish Jiaolong.App (TDPC)
         run: |
-          dotnet publish src/Jiaolong.App/Jiaolong.App.csproj -c Release -o publish/TDPC
-          # Remove pdb debug symbols from production packaging
-          Remove-Item -Path publish/TDPC/*.pdb -Force -ErrorAction SilentlyContinue
+          dotnet publish src/Jiaolong.App/Jiaolong.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:DebugSymbols=false -p:DebugType=None -o publish/TDPC
 
       - name: Create Release Zip Package
         shell: pwsh
         run: |
-          Compress-Archive -Path publish/TDPC/* -DestinationPath publish/TDPC-win-x64.zip -Force
+          foreach ($file in 'TDPC.exe', 'WinRing0x64.dll', 'WinRing0x64.sys', 'WmiBridge.ps1') {
+            if (-not (Test-Path -LiteralPath "publish/TDPC/$file" -PathType Leaf)) {
+              throw "Missing required release file $file"
+            }
+          }
+          [xml]$project = Get-Content -Raw src/Jiaolong.App/Jiaolong.App.csproj
+          $version = $project.Project.PropertyGroup.Version
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne "v$version") {
+            throw "Release tag $env:GITHUB_REF_NAME does not match application version $version"
+          }
+          $package = "publish/TDPC-v${version}-win-x64.zip"
+          Compress-Archive -Path publish/TDPC/* -DestinationPath $package -Force
+          "TDPC_PACKAGE=$package" >> $env:GITHUB_ENV
 
       - name: Upload Build Artifact
         uses: actions/upload-artifact@v4
         with:
           name: TDPC-win-x64
-          path: publish/TDPC-win-x64.zip
+          path: ${{ env.TDPC_PACKAGE }}
+          if-no-files-found: error
 
       - name: Create GitHub Release on Tag
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-          files: publish/TDPC-win-x64.zip
+          files: ${{ env.TDPC_PACKAGE }}
+          fail_on_unmatched_files: true
           draft: false
           prerelease: false
           generate_release_notes: true

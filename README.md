@@ -31,7 +31,6 @@
 - 🚀 **极速轻量与极客视觉**
   - 基于现代 WPF 开发，采用液态玻璃（Liquid Glass）深邃暗黑与晶莹浅色双主题，无缝毛玻璃半透明效果。
   - DWM 原生无闪烁缩放动画，针对 Windows 11 全屏与最小化深度调优。
-  - 启动耗时小于 0.5 秒，内存占用稳定在 ~40MB。
 - ❄️ **深度风扇调控 & 自定义温控曲线**
   - **EC 直读直写**：直连 EC 嵌入式控制器（0x66/0x62 端口及 0x4E/0x4F 扩展端口），精确转速控制。
   - **6 点自定义平滑温控曲线**：支持 50℃~100℃ 六段目标温度与转速智能插值联动。
@@ -39,7 +38,8 @@
 - ⚡ **CPU 功耗与超频降压 (Curve Optimizer)**
   - **AMD Zen4 SMU 邮箱直调**：通过 PCI 空间邮箱直连 SMU，支持一键设置全核 Curve Optimizer (CO) 负压超频（-50mV ~ 0mV）。
   - **实时功耗墙**：WMI 硬件协议直发，动态调节长时功耗（SPL）、短时功耗（SPPT）及 CPU 温度墙。
-  - **MSR 封装功耗监控**：通过 MSR 寄存器精准读取 CPU Package 实时功耗与频率。
+  - **CPU 频率上限**：同时配置普通电源方案和 Windows 游戏模式，让限频在保留睿频的游戏场景中生效。应用时会重新加载 Windows 电源方案。
+  - **CPU 监控**：通过 MSR 读取 CPU 封装功耗，通过 Windows 性能计数器估算频率。
 - 🎨 **RGB 键盘背光与氛围灯**
   - 键盘背光与氛围灯独立物理开关。
   - 支持常亮、彩虹渐变（10 FPS 平滑色相流转）、自定义十六进制色盘调色及亮度级别调节。
@@ -80,9 +80,11 @@
 ## 📦 下载与安装
 
 进入 [Releases](https://github.com/kirigayakazima/TDPC/releases) 页面，下载最新的 `TDPC-vX.X.X-win-x64.zip`：
-1. 解压至任意文件夹（建议不要放在受限制的系统盘临时目录）。
-2. 右键以管理员身份运行 `TDPC.exe`（软件需加载 Ring-0 驱动以访问 EC）。
+1. 完整解压至固定目录，保留 `TDPC.exe` 和同目录的依赖文件。发布包自带 .NET 8 运行时。
+2. 运行 `TDPC.exe` 并确认 Windows 管理员权限提示（软件需加载 Ring-0 驱动以访问 EC）。
 3. 可以在“系统控制”卡片中勾选“开机自启”与“关闭时最小化到托盘”，即可常驻后台自动生效。
+
+如果新版解压到了其他目录，先从托盘退出旧版。启动新版后将“开机自启”关闭再打开，让 Windows 登记新的可执行文件路径。
 
 ---
 
@@ -102,7 +104,7 @@ cd TDPC
 dotnet build TDPC.sln -c Release
 
 # 打包发布独立可执行程序
-dotnet publish src/Jiaolong.App/Jiaolong.App.csproj -c Release -o publish
+dotnet publish src/Jiaolong.App/Jiaolong.App.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:DebugSymbols=false -p:DebugType=None -o publish/TDPC
 ```
 
 ---

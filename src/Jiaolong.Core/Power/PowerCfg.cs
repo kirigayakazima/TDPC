@@ -10,7 +10,7 @@ namespace Jiaolong.Core.Power;
 /// </summary>
 public static class PowerCfg
 {
-    private const string SubProcessor = "54533251-82be-4824-96c1-47b60b740d00";
+    internal const string SubProcessor = "54533251-82be-4824-96c1-47b60b740d00";
 
     /// <summary>Maximum processor frequency, unit = MHz (hidden Windows setting).</summary>
     public const string MaxProcessorFrequency = "75b0ae3f-bce0-45a7-8c89-c9611c25e100";
@@ -51,9 +51,11 @@ public static class PowerCfg
     }
 
     /// <summary>Read the raw AC/DC indexes of a power setting. Returns null when absent.</summary>
-    public static (int Ac, int Dc)? ReadIndexes(string settingGuid)
+    public static (int Ac, int Dc)? ReadIndexes(string settingGuid) =>
+        ReadIndexes(GetActiveScheme(), settingGuid);
+
+    private static (int Ac, int Dc)? ReadIndexes(string scheme, string settingGuid)
     {
-        var scheme = GetActiveScheme();
         using var k = Registry.LocalMachine.OpenSubKey($@"{SchemeKey}\{scheme}\{SubProcessor}\{settingGuid}");
         if (k is null) return null;
         var ac = k.GetValue("ACSettingIndex");
@@ -73,28 +75,96 @@ public static class PowerCfg
 
     public static void SetIndex(string settingGuid, int value, bool ac = true, bool dc = true)
     {
-        var schemeStr = GetActiveScheme();
-        var scheme = Guid.Parse(schemeStr);
+        var scheme = Guid.Parse(GetActiveScheme());
+        WriteIndexes(scheme, settingGuid, value, ac, dc);
+        RefreshScheme(scheme);
+    }
+
+    private static void WriteIndexes(Guid scheme, string settingGuid, int value, bool ac = true, bool dc = true)
+    {
         var sub = Guid.Parse(SubProcessor);
         var setting = Guid.Parse(settingGuid);
+        string index = value.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
-        uint hr = 0;
-        if (ac) hr |= PowerWriteACValueIndex(IntPtr.Zero, ref scheme, ref sub, ref setting, value);
-        if (dc) hr |= PowerWriteDCValueIndex(IntPtr.Zero, ref scheme, ref sub, ref setting, value);
-        if (hr != ERROR_SUCCESS)
-            Run("powercfg", $"/setacvalueindex {schemeStr} {SubProcessor} {settingGuid} {value}");
+        if (ac && PowerWriteACValueIndex(IntPtr.Zero, ref scheme, ref sub, ref setting, value) != ERROR_SUCCESS)
+            RunPowerCfg("/setacvalueindex", scheme.ToString(), SubProcessor, settingGuid, index);
+        if (dc && PowerWriteDCValueIndex(IntPtr.Zero, ref scheme, ref sub, ref setting, value) != ERROR_SUCCESS)
+            RunPowerCfg("/setdcvalueindex", scheme.ToString(), SubProcessor, settingGuid, index);
+    }
 
-        // force Windows to re-apply the scheme so the new index actually takes effect
-        uint reapply = PowerSetActiveScheme(IntPtr.Zero, ref scheme);
-        if (reapply != ERROR_SUCCESS)
-            Run("powercfg", $"/setactive {schemeStr}");
+    private static void RefreshScheme(Guid scheme)
+    {
+        CheckActiveScheme(scheme);
+        ActivateScheme(scheme);
+    }
+
+    private static void CheckActiveScheme(Guid scheme)
+    {
+        if (Guid.Parse(GetActiveScheme()) != scheme)
+            throw new InvalidOperationException("应用电源设置时方案发生切换，请重新应用");
+    }
+
+    private static void ActivateScheme(Guid scheme)
+    {
+        if (PowerSetActiveScheme(IntPtr.Zero, ref scheme) != ERROR_SUCCESS)
+            RunPowerCfg("/setactive", scheme.ToString());
+    }
+
+    private static void ReloadGameModeScheme(Guid scheme)
+    {
+        // Reactivating the same GUID can leave Windows using a cached Game Mode profile.
+        var temporary = Guid.NewGuid();
+        RunPowerCfg("/duplicatescheme", scheme.ToString(), temporary.ToString());
+        try
+        {
+            CheckActiveScheme(scheme);
+            RunPowerCfg("/setactive", temporary.ToString());
+            Thread.Sleep(700); // Allow Windows to activate the copied processor policies.
+        }
+        finally
+        {
+            if (Guid.Parse(GetActiveScheme()) == temporary)
+                RunPowerCfg("/setactive", scheme.ToString());
+            RunPowerCfg("/delete", temporary.ToString());
+        }
+        CheckActiveScheme(scheme);
     }
 
     /// <summary>Cap CPU clock. 0 = remove the cap.</summary>
-    public static void SetMaxFrequency(int mhz)
+    public static (int Ac, int Dc, bool GameModeChanged, string? GameModeError) SetMaxFrequency(int mhz)
     {
         if (mhz < 0) throw new ArgumentOutOfRangeException(nameof(mhz));
-        SetIndex(MaxProcessorFrequency, mhz);
+        var scheme = Guid.Parse(GetActiveScheme());
+        WriteIndexes(scheme, MaxProcessorFrequency, mhz);
+
+        bool gameModeChanged = false;
+        string? gameModeError = null;
+        try
+        {
+            if (mhz > 0)
+            {
+                if (GameModeFrequency.Apply(scheme, mhz))
+                {
+                    ReloadGameModeScheme(scheme);
+                    gameModeChanged = true;
+                }
+            }
+            else
+            {
+                gameModeChanged = GameModeFrequency.Restore(() => ReloadGameModeScheme(scheme));
+            }
+        }
+        catch (Exception ex)
+        {
+            gameModeError = ex.Message;
+        }
+
+        if (!gameModeChanged) RefreshScheme(scheme);
+        var (ac, dc) = ReadIndexes(scheme.ToString(), MaxProcessorFrequency) ?? (-1, -1);
+        if (ac != mhz || dc != mhz)
+            throw new InvalidOperationException($"普通电源方案限频回读不一致（交流 {ac} / 电池 {dc} MHz）");
+
+        return (ac, dc, gameModeChanged, gameModeError);
     }
 
     public static int? GetMaxFrequency() => ReadIndexes(MaxProcessorFrequency)?.Ac;
@@ -122,20 +192,21 @@ public static class PowerCfg
         SetIndex(CoreParkingMaxCores, percent);
     }
 
-    private static void Run(string file, string args)
+    internal static void RunPowerCfg(params string[] args)
     {
-        var psi = new ProcessStartInfo(file, args)
+        var psi = new ProcessStartInfo(Path.Combine(Environment.SystemDirectory, "powercfg.exe"))
         {
             UseShellExecute = false,
             CreateNoWindow = true,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
         };
-        using var p = Process.Start(psi) ?? throw new InvalidOperationException("cannot start " + file);
-        p.StandardOutput.ReadToEnd();
-        var err = p.StandardError.ReadToEnd();
+        foreach (string arg in args) psi.ArgumentList.Add(arg);
+        using var p = Process.Start(psi) ?? throw new InvalidOperationException("cannot start powercfg");
+        var output = p.StandardOutput.ReadToEndAsync();
+        var error = p.StandardError.ReadToEndAsync();
         p.WaitForExit();
         if (p.ExitCode != 0)
-            throw new InvalidOperationException($"powercfg failed ({p.ExitCode}): {err.Trim()}");
+            throw new InvalidOperationException($"powercfg failed ({p.ExitCode}): {(error.GetAwaiter().GetResult() + output.GetAwaiter().GetResult()).Trim()}");
     }
 }

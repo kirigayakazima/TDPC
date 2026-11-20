@@ -231,10 +231,10 @@ public partial class MainWindow : Window
             // ---- power plan ----------------------------------------------
             try
             {
-                PowerCfg.SetMaxFrequency(_cfg.MaxFrequencyOn ? _cfg.MaxFrequencyMhz : 0);
                 PowerCfg.SetTurboBoost(!_cfg.TurboDisabled);
             }
-            catch (Exception ex) { AddEvent("恢复电源设置失败: " + OneLine(ex.Message)); }
+            catch (Exception ex) { AddEvent("恢复睿频设置失败: " + OneLine(ex.Message)); }
+            ApplyFrequency(_cfg.MaxFrequencyOn ? _cfg.MaxFrequencyMhz : 0);
 
             if (_wmi is null) { AddEvent("WMI 不可用，跳过固件项恢复"); return; }
 
@@ -637,16 +637,29 @@ public partial class MainWindow : Window
 
     private void ApplyFrequency()
     {
+        int mhz = FreqSwitch.IsChecked == true
+            ? (int.TryParse(FreqBox.Text, out var v) ? v : 4200)
+            : 0;
+        ApplyFrequency(mhz);
+    }
+
+    private void ApplyFrequency(int mhz)
+    {
         try
         {
-            int mhz = FreqSwitch.IsChecked == true
-                ? (int.TryParse(FreqBox.Text, out var v) ? v : 4200)
-                : 0;
-            PowerCfg.SetMaxFrequency(mhz);
-            int back = PowerCfg.GetMaxFrequency() ?? -1;
+            var result = PowerCfg.SetMaxFrequency(mhz);
             AddEvent(mhz > 0
-                ? $"CPU 限制频率 = {mhz} MHz（回读 {back}）"
-                : $"CPU 限制频率已解除（回读 {back}）");
+                ? $"CPU 限制频率 = {mhz} MHz（普通电源方案回读：交流 {result.Ac} / 电池 {result.Dc}）"
+                : "CPU 限制频率已解除（普通电源方案）");
+
+            if (result.GameModeError is { } error)
+                AddEvent("Windows 游戏模式限频设置失败: " + OneLine(error));
+            else if (result.GameModeChanged)
+                AddEvent(mhz > 0
+                    ? $"Windows 游戏模式限频 = {mhz} MHz（交流 / 电池回读一致，已重新加载）"
+                    : "Windows 游戏模式已恢复原有限频设置");
+            else if (mhz > 0)
+                AddEvent("未发现 Windows 游戏模式限频项");
         }
         catch (Exception ex) { AddEvent("锁频失败: " + OneLine(ex.Message)); }
     }
