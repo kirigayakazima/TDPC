@@ -513,7 +513,7 @@
                         <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                             <Ellipse x:Name="UpdateDot" Width="6" Height="6" Fill="{DynamicResource SubtitleText}"
                                      Margin="0,0,6,0" VerticalAlignment="Center" />
-                            <TextBlock x:Name="VersionText" Text="v1.0.1" FontSize="11" FontWeight="SemiBold"
+                            <TextBlock x:Name="VersionText" Text="v1.0.2" FontSize="11" FontWeight="SemiBold"
                                        Foreground="{DynamicResource SubtitleText}" VerticalAlignment="Center" />
                         </StackPanel>
                     </Border>
@@ -1276,7 +1276,7 @@
                                 </Border>
                                 <StackPanel VerticalAlignment="Center">
                                     <TextBlock Text="发现全新版本" FontSize="16" FontWeight="Bold" Foreground="{DynamicResource TitleText}" />
-                                    <TextBlock x:Name="UpdateVersionSubtitle" Text="v1.0.0 ➔ v1.0.1" FontSize="11.5" Foreground="{DynamicResource SubtitleText}" Margin="0,2,0,0" />
+                                    <TextBlock x:Name="UpdateVersionSubtitle" FontSize="11.5" Foreground="{DynamicResource SubtitleText}" Margin="0,2,0,0" />
                                 </StackPanel>
                             </StackPanel>
                             <Button Style="{StaticResource CaptionClose}" Width="28" Height="28" Click="UpdateModalClose_Click" DockPanel.Dock="Right">
