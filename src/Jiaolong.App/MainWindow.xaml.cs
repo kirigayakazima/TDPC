@@ -44,7 +44,9 @@ public partial class MainWindow : Window
     private string _lastSavedJson = "";
     private int _currentMode = -1;      // 0 game / 1 burst / 2 quiet
     private int _fanUpperCurrent;       // WMI 0x15 x 100 for the active mode
-    private SmuClient? _smu;            // lazy: only opened when a CO value is actually applied
+    private SmuClient? _smu;
+    private bool _smuFrequencySupported;
+    private static readonly Mutex FrequencyMutex = new(false, @"Local\TDPC.CpuFrequency");
 
     private static readonly Brush ModeOn = new SolidColorBrush(Color.FromRgb(0x2B, 0x3E, 0x5C));
     private static readonly Brush ModeOff = Brushes.Transparent;
@@ -132,6 +134,7 @@ public partial class MainWindow : Window
             return;
         }
 
+        if (_trialClock is not null) RollBackCpuTrial("退出 TDPC");
         _tray?.Dispose();
         _tray = null;
         StopColorLoop(silent: true);
@@ -207,15 +210,26 @@ public partial class MainWindow : Window
         try
         {
             // ---- UI state -------------------------------------------------
-            FreqBox.Text = _cfg.MaxFrequencyMhz.ToString();
-            FreqSwitch.IsChecked = _cfg.MaxFrequencyOn;
+            try { _smuFrequencySupported = SmuClient.SupportsBoostLimit(); }
+            catch (Exception ex) { AddEvent("SMU 限频平台识别失败: " + OneLine(ex.Message)); }
+            if (_cfg.MaxFrequencyMhz == 0)
+            {
+                _cfg.MaxFrequencyOn = false;
+                _cfg.MaxFrequencyMhz = 4500;
+            }
+            _cfg.UseSmuFrequencyLimit ??= _smuFrequencySupported
+                && _cfg.MaxFrequencyMhz is >= SmuClient.MinBoostLimitMhz and <= SmuClient.MaxBoostLimitMhz;
+            FreqMethod.IsEnabled = _smuFrequencySupported;
+            FreqMethod.ToolTip = _smuFrequencySupported
+                ? "SMU 模式会解除当前 Windows 电源方案的频率上限"
+                : "当前 CPU / BIOS 使用 Windows 电源限频";
+            SetCpuDraft(SavedCpuProfile);
             TurboSwitch.IsChecked = _cfg.TurboDisabled;
             SafetyBox.Text = _cfg.SafetyTempC.ToString(CultureInfo.InvariantCulture);
             IntervalBox.Text = _cfg.RefreshSeconds.ToString(CultureInfo.InvariantCulture);
             OsdSwitch.IsChecked = _cfg.OsdOn;
-            CoBox.Text = _cfg.CurveOffset.ToString(CultureInfo.InvariantCulture);
-            CoSwitch.IsChecked = _cfg.CurveOffsetOn;
             AutoStartSwitch.IsChecked = AutoStartManager.IsScheduled();
+            UpdateCpuStartupNotice();
             TrayCloseSwitch.IsChecked = _cfg.MinimizeToTrayOnClose;
 
             if (_cfg.LightTheme != _isLight)
@@ -234,7 +248,7 @@ public partial class MainWindow : Window
                 PowerCfg.SetTurboBoost(!_cfg.TurboDisabled);
             }
             catch (Exception ex) { AddEvent("恢复睿频设置失败: " + OneLine(ex.Message)); }
-            ApplyFrequency(_cfg.MaxFrequencyOn ? _cfg.MaxFrequencyMhz : 0);
+            RestoreCpuTrialAware();
 
             if (_wmi is null) { AddEvent("WMI 不可用，跳过固件项恢复"); return; }
 
@@ -278,9 +292,6 @@ public partial class MainWindow : Window
                 }
                 catch (Exception ex) { AddEvent("恢复风扇锁定被拒绝: " + OneLine(ex.Message)); }
             }
-            if (_cfg.CurveOffsetOn && _cfg.CurveOffset != 0 && PushCurveOptimizer(_cfg.CurveOffset, out var coMsg))
-                AddEvent("恢复 " + coMsg);
-
             ApplyCurveFromConfig(true);
             RestorePowerBudget();
 
@@ -312,15 +323,11 @@ public partial class MainWindow : Window
 
     private void SyncCfgFromUi()
     {
-        _cfg.MaxFrequencyMhz = int.TryParse(FreqBox.Text, out var f) ? f : _cfg.MaxFrequencyMhz;
-        _cfg.MaxFrequencyOn = FreqSwitch.IsChecked == true;
         _cfg.TurboDisabled = TurboSwitch.IsChecked == true;
         _cfg.SafetyTempC = Safety();
         _cfg.OsdOn = OsdSwitch.IsChecked == true;
         _cfg.LightTheme = _isLight;
         _cfg.RefreshSeconds = _intervalSeconds;
-        _cfg.CurveOffsetOn = CoSwitch.IsChecked == true;
-        if (int.TryParse(CoBox.Text, out var co) && co is <= 0 and >= -50) _cfg.CurveOffset = co;
         _cfg.PerformanceMode = _currentMode;
         _cfg.TouchLock = TpSwitch.IsChecked;
         _cfg.DgpuDirect = DgpuSwitch.IsChecked;
@@ -512,21 +519,16 @@ public partial class MainWindow : Window
         if (_sensors is null) return;
         var s = _sensors;
         CpuFreq.Text = s.CpuFreqMhz > 0 ? $"{s.CpuFreqMhz / 1000.0:0.00} GHz" : "--";
-        CpuLoad.Text = s.CpuLoad > 0 ? $"{s.CpuLoad:0} %" : "--";
+        CpuFreq.ToolTip = s.CpuClockUsesPerformanceCounter ? "Windows 处理器总计频率估算" : "Windows WMI 报告的处理器时钟";
+        CpuLoad.Text = s.CpuLoad is double cpuBusy ? $"{cpuBusy:0} %" : "--";
         CpuCores.Text = s.CpuCores > 0 ? s.CpuCores.ToString() : "--";
-        CpuMax.Text = s.CpuMaxMhz > 0 ? $"{s.CpuMaxMhz / 1000.0:0.00} GHz" : "--";
+        CpuMax.Text = s.CpuBaseMhz > 0 ? $"{s.CpuBaseMhz / 1000.0:0.00} GHz" : "--";
 
-        if (s.GpuAvailable)
-        {
-            GpuTemp.Text = $"{s.GpuTempC:0} ℃";
-            GpuClock.Text = $"{s.GpuClockMhz / 1000.0:0.00} GHz";
-            GpuLoad.Text = $"{s.GpuLoad:0} %";
-            GpuPower.Text = $"{s.GpuPowerW:0} W";
-        }
-        else
-        {
-            GpuTemp.Text = GpuClock.Text = GpuLoad.Text = GpuPower.Text = "--";
-        }
+        GpuTemp.Text = s.GpuTempC is double temp ? $"{temp:0} ℃" : "--";
+        GpuClock.Text = s.GpuClockMhz is double clock ? $"{clock / 1000.0:0.00} GHz" : "--";
+        GpuLoad.Text = s.GpuLoad is double gpuBusy ? $"{gpuBusy:0} %" : "--";
+        GpuLoad.ToolTip = s.GpuLoadUsesWindowsEngine ? "Windows 最忙 GPU 引擎，同任务管理器口径" : "NVIDIA 驱动采样（Windows 引擎数据不可用或预热中）";
+        GpuPower.Text = s.GpuPowerW is double watts ? $"{watts:0.0} W" : "--";
 
         MemLoad.Text = s.MemLoadPct > 0 ? $"{s.MemLoadPct:0} %" : "--";
         MemAvail.Text = s.MemAvailGb > 0 ? $"{s.MemAvailGb:0.0} GB" : "--";
@@ -536,15 +538,14 @@ public partial class MainWindow : Window
             : "--";
 
         CpuPower.Text = s.CpuPowerW > 0 ? $"{s.CpuPowerW:0.0} W" : "--";
-        CoSetting.Text = CoSwitch.IsChecked == true
-            ? $"{(int.TryParse(CoBox.Text, out var c) ? c : 0)} mV"
-            : "关闭";
+        CoSetting.Text = _activeCpuCo switch { 0 => "关闭", int offset => offset.ToString(CultureInfo.InvariantCulture), _ => "--" };
         CoAck.Text = string.IsNullOrEmpty(_coAck) ? "--" : _coAck;
         TurboState.Text = TurboSwitch.IsChecked == true ? "已关闭" : "开启";
     }
 
     /// <summary>Last SMU acknowledgement string for the CO row (set by PushCurveOptimizer).</summary>
     private string _coAck = "";
+    private int? _activeCpuCo;
 
     private void UpdateOwnerPill()
     {
@@ -616,52 +617,93 @@ public partial class MainWindow : Window
     }
 
     // ================================================================ cpu card
-    private void FreqBox_Committed(object sender, RoutedEventArgs e)
-    {
-        if (_syncing || FreqSwitch.IsChecked != true) return;
-        ApplyFrequency();
-    }
+    private int SavedFrequencyMethodIndex => _smuFrequencySupported && _cfg.UseSmuFrequencyLimit != false ? 0 : 1;
 
-    private void FreqBox_KeyDown(object sender, KeyEventArgs e)
+    private bool ApplyFrequency(bool useSmu, int mhz, bool strict = false)
     {
-        if (e.Key != Key.Enter) return;
-        e.Handled = true;
-        ((FrameworkElement)sender).MoveFocus(new TraversalRequest(FocusNavigationDirection.Next));
-    }
-
-    private void FreqSwitch_Changed(object sender, RoutedEventArgs e)
-    {
-        if (_syncing) return;
-        ApplyFrequency();
-    }
-
-    private void ApplyFrequency()
-    {
-        int mhz = FreqSwitch.IsChecked == true
-            ? (int.TryParse(FreqBox.Text, out var v) ? v : 4200)
-            : 0;
-        ApplyFrequency(mhz);
-    }
-
-    private void ApplyFrequency(int mhz)
-    {
+        bool entered = false;
         try
         {
-            var result = PowerCfg.SetMaxFrequency(mhz);
-            AddEvent(mhz > 0
-                ? $"CPU 限制频率 = {mhz} MHz（普通电源方案回读：交流 {result.Ac} / 电池 {result.Dc}）"
-                : "CPU 限制频率已解除（普通电源方案）");
+            try { entered = FrequencyMutex.WaitOne(0); }
+            catch (AbandonedMutexException) { entered = true; }
+            if (!entered) throw new InvalidOperationException("另一 TDPC 实例正在应用 CPU 限频");
 
-            if (result.GameModeError is { } error)
-                AddEvent("Windows 游戏模式限频设置失败: " + OneLine(error));
-            else if (result.GameModeChanged)
-                AddEvent(mhz > 0
-                    ? $"Windows 游戏模式限频 = {mhz} MHz（交流 / 电池回读一致，已重新加载）"
-                    : "Windows 游戏模式已恢复原有限频设置");
-            else if (mhz > 0)
-                AddEvent("未发现 Windows 游戏模式限频项");
+            if (useSmu && mhz > 0)
+            {
+                SmuFrequencyLimit.Apply(_smu ??= new SmuClient(), mhz);
+                AddEvent($"SMU 睿频上限 = {mhz} MHz（固件连续两次回读一致）");
+                try
+                {
+                    bool cleared = ApplyWindowsFrequency(0);
+                    FreqApplyStatus.Text = cleared ? $"SMU 回读 {mhz} MHz" : $"SMU 回读 {mhz} MHz，Windows 游戏模式恢复待确认";
+                    return cleared || !strict;
+                }
+                catch (Exception ex)
+                {
+                    FreqApplyStatus.Text = $"SMU 回读 {mhz} MHz，Windows 限频解除失败";
+                    AddEvent("Windows 限频解除失败: " + OneLine(ex.Message));
+                    return !strict;
+                }
+            }
+
+            bool windowsOk = ApplyWindowsFrequency(mhz);
+            if (strict && !windowsOk)
+            {
+                FreqApplyStatus.Text = "普通电源方案已更新，游戏模式待确认";
+                return false;
+            }
+            try
+            {
+                if (_smuFrequencySupported && SmuFrequencyLimit.HasSavedLimit()
+                    && SmuFrequencyLimit.Release(_smu ??= new SmuClient()) is { } smu)
+                {
+                    AddEvent(smu.Restored
+                        ? $"已恢复 TDPC 接管前的 SMU 上限 {smu.Mhz} MHz"
+                        : $"SMU 上限已由外部更改为 {smu.Mhz} MHz，TDPC 已解除接管");
+                }
+            }
+            catch
+            {
+                if (mhz > 0)
+                {
+                    try { ApplyWindowsFrequency(0); }
+                    catch (Exception ex) { AddEvent("切换失败后解除 Windows 限频也失败: " + OneLine(ex.Message)); }
+                }
+                throw;
+            }
+            FreqApplyStatus.Text = windowsOk
+                ? (mhz > 0 ? $"Windows 回读 {mhz} MHz" : "TDPC 限频已关闭")
+                : "普通电源方案已更新，游戏模式待确认";
+            return true;
         }
-        catch (Exception ex) { AddEvent("锁频失败: " + OneLine(ex.Message)); }
+        catch (Exception ex)
+        {
+            FreqApplyStatus.Text = "应用未完成，详见日志";
+            AddEvent("锁频失败: " + OneLine(ex.Message));
+            return false;
+        }
+        finally
+        {
+            if (entered) FrequencyMutex.ReleaseMutex();
+        }
+    }
+
+    private bool ApplyWindowsFrequency(int mhz)
+    {
+        var result = PowerCfg.SetMaxFrequency(mhz);
+        AddEvent(mhz > 0
+            ? $"CPU 限制频率 = {mhz} MHz（普通电源方案回读：交流 {result.Ac} / 电池 {result.Dc}）"
+            : "CPU 限制频率已解除（普通电源方案）");
+
+        if (result.GameModeError is { } error)
+            AddEvent("Windows 游戏模式限频设置失败: " + OneLine(error));
+        else if (result.GameModeChanged)
+            AddEvent(mhz > 0
+                ? $"Windows 游戏模式限频 = {mhz} MHz（交流 / 电池回读一致，已重新加载）"
+                : "Windows 游戏模式已恢复原有限频设置");
+        else if (mhz > 0)
+            AddEvent("未发现 Windows 游戏模式限频项");
+        return result.GameModeError is null;
     }
 
     private void TurboSwitch_Changed(object sender, RoutedEventArgs e)
@@ -849,60 +891,20 @@ public partial class MainWindow : Window
         {
             _smu ??= new SmuClient();
             bool ok = _smu.SetCurveOptimizer(mv, out var rsp);
+            _activeCpuCo = ok ? mv : null;
             _coAck = ok ? "RSP=1 已确认" : $"RSP=0x{rsp:X}";
             message = ok
-                ? $"电压调节 CO = {mv} mV（SMU 已确认 RSP={rsp}）"
+                ? $"电压调节 CO = {mv}（SMU 已确认 RSP={rsp}）"
                 : $"SMU 未确认 CO（RSP=0x{rsp:X}）";
             return ok;
         }
         catch (Exception ex)
         {
+            _activeCpuCo = null;
             _coAck = "失败";
             message = "CO 失败: " + OneLine(ex.Message);
             return false;
         }
-    }
-
-    private void Co_Committed(object sender, RoutedEventArgs e) => ApplyCo();
-
-    private void Co_KeyDown(object sender, KeyEventArgs e)
-    {
-        if (e.Key != Key.Enter) return;
-        e.Handled = true;
-        ApplyCo();
-    }
-
-    private void Co_Changed(object sender, RoutedEventArgs e)
-    {
-        if (_syncing) return;
-        ApplyCo();
-    }
-
-    private void ApplyCo()
-    {
-        if (_syncing) return;
-
-        if (!int.TryParse(CoBox.Text, out var mv) || mv > 0 || mv < -50)
-        {
-            CoBox.Text = _cfg.CurveOffset.ToString(CultureInfo.InvariantCulture);
-            AddEvent("电压调节范围 -50 ~ 0（0 = 关闭降压，不接受正数）");
-            return;
-        }
-
-        if (CoSwitch.IsChecked != true)
-        {
-            // turning it off must actually restore the CPU, not leave -40 latched
-            if (PushCurveOptimizer(0, out var offMsg)) AddEvent("电压调节已关闭 → " + offMsg);
-            _cfg.CurveOffsetOn = false;
-            return;
-        }
-
-        if (PushCurveOptimizer(mv, out var msg))
-        {
-            _cfg.CurveOffset = mv;
-            _cfg.CurveOffsetOn = true;
-        }
-        AddEvent(msg);
     }
 
     // ================================================================ lighting (0x0A/0x0F/0x10/0x11/0x12)
@@ -1454,8 +1456,22 @@ public partial class MainWindow : Window
         bool want = AutoStartSwitch.IsChecked == true;
         bool ok = AutoStartManager.SetAutoStart(want, out var msg);
         AddEvent(ok ? $"开机自启: {msg}" : $"开机自启失败: {msg}");
-        _cfg.AutoStart = want;
+        if (!ok) SetChecked(AutoStartSwitch, AutoStartManager.IsScheduled());
+        UpdateCpuStartupNotice();
+        _cfg.AutoStart = AutoStartSwitch.IsChecked == true;
         PersistIfChanged();
+    }
+
+    private void UpdateCpuStartupNotice() =>
+        CpuStartupNotice.Visibility = AutoStartSwitch.IsChecked == true && !AutoStartManager.PointsToCurrentExecutable()
+            ? Visibility.Visible : Visibility.Collapsed;
+
+    private void UseCurrentVersionAtLogin_Click(object sender, RoutedEventArgs e)
+    {
+        bool ok = AutoStartManager.SetAutoStart(true, out string message);
+        AddEvent(ok ? $"开机自启已更新到本版: {message}" : $"更新开机自启失败: {message}");
+        UpdateCpuStartupNotice();
+        Toast(ok ? "已更新开机自启" : "自启更新失败，详情见日志");
     }
 
     private void TrayClose_Changed(object sender, RoutedEventArgs e)

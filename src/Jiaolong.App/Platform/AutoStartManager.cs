@@ -3,6 +3,7 @@ namespace Jiaolong.App.Platform;
 using System;
 using System.Diagnostics;
 using System.IO;
+using System.Xml.Linq;
 
 public static class AutoStartManager
 {
@@ -31,6 +32,33 @@ public static class AutoStartManager
         {
             return false;
         }
+    }
+
+    public static bool PointsToCurrentExecutable()
+    {
+        try
+        {
+            string? current = Environment.ProcessPath;
+            if (string.IsNullOrEmpty(current)) return false;
+            using var proc = Process.Start(new ProcessStartInfo
+            {
+                FileName = "schtasks.exe",
+                Arguments = $"/query /tn \"{TaskName}\" /xml",
+                UseShellExecute = false,
+                CreateNoWindow = true,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+            });
+            if (proc is null) return false;
+            var result = proc.StandardOutput.ReadToEndAsync();
+            if (!proc.WaitForExit(3000) || proc.ExitCode != 0) return false;
+            string? command = XDocument.Parse(result.GetAwaiter().GetResult())
+                .Descendants().FirstOrDefault(node => node.Name.LocalName == "Command")?.Value.Trim().Trim('"');
+            return !string.IsNullOrWhiteSpace(command)
+                && Path.GetFullPath(Environment.ExpandEnvironmentVariables(command))
+                    .Equals(current, StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
     }
 
     /// <summary>

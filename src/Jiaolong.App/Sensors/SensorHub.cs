@@ -35,8 +35,8 @@ public sealed class RingBuffer
 
 /// <summary>
 /// Collects CPU/GPU telemetry using only things that ship with the machine:
-///   CPU  - WQL against Win32_Processor (through our existing WMI bridge)
-///   GPU  - nvidia-smi (bundled with the NVIDIA driver), cached for <see cref="GpuCacheMs"/>
+///   CPU  - processor time and performance counters, with a Win32_Processor fallback
+///   GPU  - WDDM engine activity and NVIDIA driver telemetry
 /// Nothing here pulls a NuGet package.
 /// </summary>
 public sealed class SensorHub
@@ -44,10 +44,10 @@ public sealed class SensorHub
     private readonly JiaolongWmi? _wmi;
     private readonly object _gate = new();
     private DateTime _lastGpuUtc = DateTime.MinValue;
-    private bool _gpuProbed;
+    private readonly GpuEngineSampler _gpuEngines = new();
 
     // perf counters: real-time CPU frequency/load without WMI round-trips
-    private PerformanceCounter? _cFreq, _cPerf, _cUtil;
+    private PerformanceCounter? _cFreq, _cPerf, _cBusy;
     private bool _countersTried;
     private bool _countersOk;
     private bool _coresQueried;
@@ -56,8 +56,9 @@ public sealed class SensorHub
 
     // ---- latest values -------------------------------------------------
     public double CpuFreqMhz { get; private set; }
-    public double CpuMaxMhz { get; private set; }
-    public double CpuLoad { get; private set; }
+    public double CpuBaseMhz { get; private set; }
+    public double? CpuLoad { get; private set; }
+    public bool CpuClockUsesPerformanceCounter { get; private set; }
     public int CpuCores { get; private set; }
 
     /// <summary>Package power in watts from MSR 0xC001029B (0 until the second sample).</summary>
@@ -66,11 +67,11 @@ public sealed class SensorHub
 
     private readonly MsrReader _msr = new();
 
-    public bool GpuAvailable { get; private set; }
-    public double GpuTempC { get; private set; }
-    public double GpuLoad { get; private set; }
-    public double GpuClockMhz { get; private set; }
-    public double GpuPowerW { get; private set; }
+    public double? GpuTempC { get; private set; }
+    public double? GpuLoad { get; private set; }
+    public double? GpuClockMhz { get; private set; }
+    public double? GpuPowerW { get; private set; }
+    public bool GpuLoadUsesWindowsEngine { get; private set; }
 
     // memory / disk (WQL, cached - these change slowly so we refresh every 5 s)
     public double MemTotalGb { get; private set; }
@@ -101,8 +102,8 @@ public sealed class SensorHub
         lock (_gate)
         {
             PollCpu();
-            PollGpu();
             CpuPowerW = _msr.SamplePackagePower();
+            PollGpu();
             PollMemDisk();
         }
     }
@@ -142,6 +143,9 @@ public sealed class SensorHub
 
     private void PollCpu()
     {
+        CpuLoad = null;
+        CpuFreqMhz = 0;
+        CpuClockUsesPerformanceCounter = false;
         if (TryPerfCounters()) return;
         PollCpuViaWql();
     }
@@ -159,28 +163,30 @@ public sealed class SensorHub
                 _countersTried = true;
                 _cFreq = new PerformanceCounter("Processor Information", "Processor Frequency", "_Total");
                 _cPerf = new PerformanceCounter("Processor Information", "% Processor Performance", "_Total");
-                _cUtil = new PerformanceCounter("Processor Information", "% Processor Utility", "_Total");
+                _cBusy = new PerformanceCounter("Processor Information", "% Processor Time", "_Total");
                 _ = _cFreq.NextValue();
                 _ = _cPerf.NextValue();
-                _ = _cUtil.NextValue();
+                _ = _cBusy.NextValue();
                 _countersOk = true;
+                return true;
             }
             if (!_countersOk) return false;
             var cf = _cFreq;
             var cp = _cPerf;
-            var cu = _cUtil;
-            if (cf is null || cp is null || cu is null) return false;
+            var cb = _cBusy;
+            if (cf is null || cp is null || cb is null) return false;
 
             double nominal = cf.NextValue();
             double perf = cp.NextValue();
-            double util = cu.NextValue();
+            double busy = cb.NextValue();
 
             if (nominal > 0)
             {
-                CpuMaxMhz = nominal;
+                CpuBaseMhz = nominal;
                 CpuFreqMhz = nominal * Math.Max(perf, 0) / 100.0;
+                CpuClockUsesPerformanceCounter = true;
             }
-            CpuLoad = Math.Max(util, 0);
+            CpuLoad = double.IsFinite(busy) ? Math.Clamp(busy, 0, 100) : null;
             LastError = "";
             if (!_coresQueried) QueryCoresOnce();
             return true;
@@ -221,8 +227,8 @@ public sealed class SensorHub
 
             var map = ParseNamedRow(rows[0]);
             CpuFreqMhz = map.TryGetValue("CurrentClockSpeed", out var a) ? Num(a) : 0;
-            CpuMaxMhz = map.TryGetValue("MaxClockSpeed", out var b) ? Num(b) : 0;
-            CpuLoad = map.TryGetValue("LoadPercentage", out var c) ? Num(c) : 0;
+            CpuBaseMhz = map.TryGetValue("MaxClockSpeed", out var b) ? Num(b) : 0;
+            CpuLoad = map.TryGetValue("LoadPercentage", out var c) ? ParseReading(c, 0, 100) : null;
             CpuCores = (int)(map.TryGetValue("NumberOfCores", out var d) ? Num(d) : 0);
             LastError = "";
         }
@@ -247,16 +253,17 @@ public sealed class SensorHub
 
     private void PollGpu()
     {
-        bool due = (DateTime.UtcNow - _lastGpuUtc).TotalMilliseconds >= GpuCacheMs;
-        if (!due && _gpuProbed) return;
+        if ((DateTime.UtcNow - _lastGpuUtc).TotalMilliseconds < GpuCacheMs) return;
         _lastGpuUtc = DateTime.UtcNow;
+        GpuTempC = GpuLoad = GpuClockMhz = GpuPowerW = null;
+        GpuLoadUsesWindowsEngine = false;
 
         try
         {
             var psi = new ProcessStartInfo
             {
                 FileName = "nvidia-smi",
-                Arguments = "--query-gpu=temperature.gpu,utilization.gpu,clocks.gr,power.draw " +
+                Arguments = "--query-gpu=pci.device_id,temperature.gpu,utilization.gpu,clocks.current.graphics,power.draw " +
                             "--format=csv,noheader,nounits",
                 UseShellExecute = false,
                 CreateNoWindow = true,
@@ -265,27 +272,48 @@ public sealed class SensorHub
             };
             using var p = Process.Start(psi);
             if (p is null) return;
-            string line = p.StandardOutput.ReadLine() ?? "";
-            p.WaitForExit(1500);
-            _gpuProbed = true;
-
-            if (p.ExitCode != 0 || string.IsNullOrWhiteSpace(line)) { GpuAvailable = false; return; }
-
-            var parts = line.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
-            if (parts.Length < 4) { GpuAvailable = false; return; }
-
-            GpuTempC = Num(parts[0]);
-            GpuLoad = Num(parts[1]);
-            GpuClockMhz = Num(parts[2]);
-            GpuPowerW = Num(parts[3]);
-            GpuAvailable = GpuTempC > 0;
-            LastError = "";
+            var output = p.StandardOutput.ReadToEndAsync();
+            _ = p.StandardError.ReadToEndAsync();
+            if (!p.WaitForExit(1500))
+            {
+                p.Kill();
+                return;
+            }
+            if (p.ExitCode != 0) return;
+            var gpu = ParseNvidiaGpu(output.GetAwaiter().GetResult());
+            if (gpu is not { } sample) return;
+            GpuTempC = sample.TempC;
+            GpuClockMhz = sample.ClockMhz;
+            GpuPowerW = sample.PowerW;
+            // DXGI can expose several LUIDs for one physical card. With multiple
+            // NVIDIA cards, the per-card driver value is the unambiguous fallback.
+            var engine = sample.SingleNvidiaGpu ? _gpuEngines.Sample(sample.DeviceId) : null;
+            GpuLoadUsesWindowsEngine = engine.HasValue;
+            GpuLoad = engine ?? sample.Load;
         }
-        catch
-        {
-            GpuAvailable = false;   // nvidia-smi missing or blocked -> silently degrade
-        }
+        catch { /* Driver data is unavailable this tick. */ }
     }
+
+    internal static NvidiaGpuSample? ParseNvidiaGpu(string output)
+    {
+        string[] rows = output.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        if (rows.Length == 0) return null;
+        // The NVIDIA telemetry tiles refer to the first NVIDIA adapter, including on hybrid graphics.
+        var fields = rows[0].Split(',', StringSplitOptions.TrimEntries);
+        if (fields.Length != 5 || !fields[0].StartsWith("0x", StringComparison.OrdinalIgnoreCase)
+            || !uint.TryParse(fields[0].AsSpan(2), NumberStyles.HexNumber, CultureInfo.InvariantCulture, out uint pci)
+            || (pci & 0xFFFF) != 0x10DE)
+            return null;
+        return new NvidiaGpuSample(pci >> 16, rows.Length == 1, ParseReading(fields[1], 0, 150), ParseReading(fields[2], 0, 100),
+            ParseReading(fields[3], 0, 10000), ParseReading(fields[4], 0, 1200));
+    }
+
+    internal readonly record struct NvidiaGpuSample(
+        uint DeviceId, bool SingleNvidiaGpu, double? TempC, double? Load, double? ClockMhz, double? PowerW);
+
+    private static double? ParseReading(string value, double minimum, double maximum) =>
+        double.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out double result)
+            && double.IsFinite(result) && result >= minimum && result <= maximum ? result : null;
 
     private static double Num(string s) =>
         double.TryParse(s, NumberStyles.Float, CultureInfo.InvariantCulture, out var v) ? v : 0;
@@ -297,7 +325,7 @@ public sealed class SensorHub
         {
             if (CpuFreqMhz > 0) CpuFreqHistory.Push((float)CpuFreqMhz);
             if (cpuTemp > 0) CpuTempHistory.Push((float)cpuTemp);
-            if (GpuAvailable && GpuTempC > 0) GpuTempHistory.Push((float)GpuTempC);
+            if (GpuTempC is double temperature && temperature > 0) GpuTempHistory.Push((float)temperature);
         }
     }
 }

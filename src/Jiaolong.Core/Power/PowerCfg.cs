@@ -207,6 +207,6 @@ public static class PowerCfg
         var error = p.StandardError.ReadToEndAsync();
         p.WaitForExit();
         if (p.ExitCode != 0)
-            throw new InvalidOperationException($"powercfg failed ({p.ExitCode}): {(error.GetAwaiter().GetResult() + output.GetAwaiter().GetResult()).Trim()}");
+            throw new InvalidOperationException($"powercfg {args[0]} failed ({p.ExitCode}): {(error.GetAwaiter().GetResult() + output.GetAwaiter().GetResult()).Trim()}");
     }
 }

@@ -7,6 +7,7 @@ publish/
 decompile/
 tools/
 docs/
+/test/MoBai-CPU-诊断-*.json
 
 ## Visual Studio / VS Code / JetBrains
 .vs/

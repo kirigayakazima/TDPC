@@ -32,8 +32,10 @@ public sealed class AppConfig
     public int[] CurveRpm { get; set; } = { 1984, 2189, 2311, 2513, 4311, 5703 };
 
     // ---- cpu --------------------------------------------------------
-    public int MaxFrequencyMhz { get; set; } = 4200;
+    public int MaxFrequencyMhz { get; set; } = 4500;
     public bool MaxFrequencyOn { get; set; } = true;
+    /// <summary>Null selects SMU on the validated platform, Windows elsewhere.</summary>
+    public bool? UseSmuFrequencyLimit { get; set; }
     public bool TurboDisabled { get; set; }
 
     /// <summary>Curve Optimiser offset, -50..0 (negative = undervolt). 0 = off.</summary>
@@ -110,19 +112,29 @@ public static class ConfigStore
 
     public static void Save(AppConfig cfg)
     {
-        try
-        {
-            cfg.Clamp();
-            var dir = Path.GetDirectoryName(FilePath)!;
-            Directory.CreateDirectory(dir);
-            var tmp = FilePath + ".tmp";
-            File.WriteAllText(tmp, JsonSerializer.Serialize(cfg, Options));
-            File.Move(tmp, FilePath, overwrite: true);   // atomic enough: never a half-written file
-        }
+        try { SaveConfirmed(cfg); }
         catch
         {
             // persistence is a convenience, never fatal
         }
+    }
+
+    public static void SaveConfirmed(AppConfig cfg)
+    {
+        cfg.Clamp();
+        WriteAtomic(FilePath, JsonSerializer.Serialize(cfg, Options));
+    }
+
+    internal static void WriteAtomic(string path, string json)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        string temporary = path + ".tmp";
+        using (var stream = new FileStream(temporary, FileMode.Create, FileAccess.Write, FileShare.None))
+        {
+            stream.Write(System.Text.Encoding.UTF8.GetBytes(json));
+            stream.Flush(flushToDisk: true);
+        }
+        File.Move(temporary, path, overwrite: true);
     }
 }
 

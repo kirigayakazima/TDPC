@@ -48,6 +48,7 @@ internal static class GameModeFrequency
         if (backups is null) return false;
 
         var restored = new List<string>();
+        bool reloadRequired = false;
         foreach (string name in backups.GetValueNames())
         {
             if (!Guid.TryParseExact(name, "D", out var scheme)) continue;
@@ -62,16 +63,21 @@ internal static class GameModeFrequency
             {
                 RestoreOverride(settings, AcOverride, ac);
                 RestoreOverride(settings, DcOverride, dc);
+                if (ReadOverride(settings, AcOverride) != ac || ReadOverride(settings, DcOverride) != dc)
+                    throw new InvalidOperationException($"Windows 游戏模式原值恢复后回读不一致（{scheme}）");
+                reloadRequired = true;
             }
+            else if (ac is not null || dc is not null)
+                throw new InvalidOperationException($"找不到有原值备份的 Windows 游戏模式配置（{scheme}）");
 
+            // A failed first apply can leave a backup with two absent overrides and no subkey.
             restored.Add(name);
         }
 
-        if (restored.Count == 0) return false;
-        reload();
+        if (reloadRequired) reload();
         foreach (string name in restored)
             backups.DeleteValue(name, throwOnMissingValue: false);
-        return true;
+        return reloadRequired;
     }
 
     private static int? ReadOverride(RegistryKey? settings, string name) =>

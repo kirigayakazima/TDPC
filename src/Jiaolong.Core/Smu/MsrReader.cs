@@ -23,7 +23,7 @@ public sealed class MsrReader
     private readonly object _gate = new();
     private bool _ready;
     private bool _tried;
-    private double _energyUnit = Math.Pow(2, -16);
+    private double _energyUnit;
     private uint _lastEnergy;
     private long _lastTicks = long.MinValue;
 
@@ -54,11 +54,11 @@ public sealed class MsrReader
             try
             {
                 if (GetDllStatus() != 0) InitializeOls();
-                _ready = GetDllStatus() == 0;
-                if (_ready && Rdmsr(RaplUnit, out uint unit, out _))
+                if (GetDllStatus() == 0 && Rdmsr(RaplUnit, out uint unit, out _))
                 {
                     int exp = (int)((unit >> 8) & 0x1F);
                     _energyUnit = Math.Pow(2, -exp);
+                    _ready = true;
                 }
             }
             catch { _ready = false; }
@@ -83,7 +83,11 @@ public sealed class MsrReader
     {
         lock (_gate)
         {
-            if (!Read(PkgEnergy, out uint energy)) return 0;
+            if (!Read(PkgEnergy, out uint energy))
+            {
+                _lastTicks = long.MinValue;
+                return 0;
+            }
 
             long now = Stopwatch.GetTimestamp();
             if (_lastTicks == long.MinValue)

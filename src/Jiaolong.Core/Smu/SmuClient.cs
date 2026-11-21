@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using Microsoft.Win32;
 
 namespace Jiaolong.Core.Smu;
 
@@ -35,6 +36,11 @@ public sealed class SmuClient
     public const uint MsgSetCoPerCore = 6;
     public const uint MsgEnableOc = 93;
     public const uint MsgDisableOc = 94;
+    private const uint MsgGetBoostLimit = 0x6E;
+    private const uint MsgSetBoostLimit = 0x70;
+
+    public const int MinBoostLimitMhz = 3600;
+    public const int MaxBoostLimitMhz = 5150;
 
     private readonly object _gate = new();
     private bool _driverReady;
@@ -45,7 +51,19 @@ public sealed class SmuClient
     [DllImport(Ols, CallingConvention = CallingConvention.Cdecl)]
     private static extern bool WritePciConfigDword(ushort pciAddress, ushort regAddress, uint value);
     [DllImport(Ols, CallingConvention = CallingConvention.Cdecl)]
-    private static extern uint ReadPciConfigDword(ushort pciAddress, ushort regAddress);
+    private static extern bool ReadPciConfigDwordEx(ushort pciAddress, ushort regAddress, out uint value);
+
+    public static bool SupportsBoostLimit()
+    {
+        using var cpu = Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\CentralProcessor\0");
+        using var bios = Registry.LocalMachine.OpenSubKey(@"HARDWARE\DESCRIPTION\System\BIOS");
+        return cpu?.GetValue("VendorIdentifier") is "AuthenticAMD"
+            && cpu.GetValue("Identifier") is string identifier
+            && identifier.StartsWith("AMD64 Family 25 Model 97 Stepping ", StringComparison.Ordinal)
+            && cpu.GetValue("ProcessorNameString") is string name
+            && name.Contains("Ryzen 7 7745HX", StringComparison.OrdinalIgnoreCase)
+            && bios?.GetValue("BIOSVersion") is "MRID6_23_P_V35";
+    }
 
     public SmuClient()
     {
@@ -60,49 +78,51 @@ public sealed class SmuClient
     private bool WriteReg(uint addr, uint data) =>
         WritePciConfigDword(PciAddr, OffIndex, addr) && WritePciConfigDword(PciAddr, OffData, data);
 
-    private uint ReadReg(uint addr)
+    private bool TryReadReg(uint addr, out uint value)
     {
-        WritePciConfigDword(PciAddr, OffIndex, addr);
-        return ReadPciConfigDword(PciAddr, OffData);
+        value = 0;
+        return WritePciConfigDword(PciAddr, OffIndex, addr)
+            && ReadPciConfigDwordEx(PciAddr, OffData, out value);
     }
 
-    private bool WaitDone(uint rsp)
+    private bool WaitForResponse(uint address, out uint response)
     {
-        for (int i = Retry; i > 0; i--)
-            if (ReadReg(rsp) == 1) return true;
+        for (int i = 0; i < Retry; i++)
+        {
+            if (!TryReadReg(address, out response)) return false;
+            if (response != 0) return true;
+        }
+        response = 0;
         return false;
     }
 
     /// <summary>
-    /// Full SMU transaction: mutex -> clear MSG -> write args -> write msg -> wait -> read args.
+    /// Wait for an idle mailbox, clear the previous response, send, then read the new response.
     /// Returns the final RSP register value (1 == SMU acknowledged the command).
     /// </summary>
     private uint SendMsg(uint msgAddr, uint rspAddr, uint argAddr, uint msg, uint[] args)
     {
         lock (_gate)
         {
-            // 1. clear / kick the message register, retrying until the SMU accepts it
-            bool kicked = false;
-            for (int i = Retry; i > 0 && !kicked; i--) kicked = WriteReg(msgAddr, 0);
-            if (!kicked) { ReadReg(rspAddr); return 0; }
+            if (args.Length > 6) throw new ArgumentOutOfRangeException(nameof(args));
+            if (!WaitForResponse(rspAddr, out _) || !WriteReg(rspAddr, 0)
+                || !TryReadReg(rspAddr, out uint cleared) || cleared != 0)
+                return 0;
 
-            // 2. arguments: allocate fixed 6-slot buffer and write all slots (zero-fill unused)
-            //    so the SMU sees a clean register state
-            var buffer = new uint[6];
-            int count = Math.Min(args.Length, buffer.Length);
-            for (int i = 0; i < count; i++) buffer[i] = args[i];
-            for (int i = 0; i < buffer.Length; i++) WriteReg(argAddr + (uint)(i * 4), buffer[i]);
+            for (int i = 0; i < 6; i++)
+            {
+                uint address = argAddr + (uint)(i * 4);
+                uint value = i < args.Length ? args[i] : 0;
+                if (!WriteReg(address, value) || !TryReadReg(address, out uint written) || written != value)
+                    return 0;
+            }
+            if (!WriteReg(msgAddr, msg) || !WaitForResponse(rspAddr, out uint response))
+                return 0;
+            if (response != 1) return response;
 
-            // 3. fire the message
-            WriteReg(msgAddr, msg);
-
-            // 4. wait for completion
-            if (!WaitDone(rspAddr)) { ReadReg(rspAddr); return 0; }
-
-            // 5. read results back
-            for (int i = 0; i < args.Length; i++) args[i] = ReadReg(argAddr + (uint)(i * 4));
-
-            return ReadReg(rspAddr);
+            for (int i = 0; i < args.Length; i++)
+                if (!TryReadReg(argAddr + (uint)(i * 4), out args[i])) return 0;
+            return response;
         }
     }
 
@@ -113,6 +133,30 @@ public sealed class SmuClient
     /// Runs a command on the RSMU/PSMU mailbox (e.g. Curve Optimizer / OC commands).
     /// </summary>
     public uint SendRsmu(uint msg, params uint[] args) => SendMsg(PsmuMsg, PsmuRsp, PsmuArg, msg, args);
+
+    internal int ReadBoostLimit()
+    {
+        uint[] args = [0];
+        uint response = SendRsmu(MsgGetBoostLimit, args);
+        if (response != 1 || args[0] is 0 or > 9000)
+            throw new InvalidOperationException($"SMU 睿频上限读取失败（RSP=0x{response:X}，返回 {args[0]}）");
+        return (int)args[0];
+    }
+
+    internal void WriteBoostLimitVerified(int mhz)
+    {
+        lock (_gate)
+        {
+            uint response = SendRsmu(MsgSetBoostLimit, (uint)mhz);
+            if (response != 1)
+                throw new InvalidOperationException($"SMU 拒绝写入 {mhz} MHz（RSP=0x{response:X}）");
+
+            int first = ReadBoostLimit();
+            int second = ReadBoostLimit();
+            if (first != mhz || second != mhz)
+                throw new InvalidOperationException($"SMU 目标 {mhz} MHz，实际回读 {first} / {second} MHz");
+        }
+    }
 
     /// <summary>
     /// Curve Optimizer for all cores.
