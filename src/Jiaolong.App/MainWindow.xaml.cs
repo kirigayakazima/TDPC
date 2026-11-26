@@ -75,6 +75,7 @@ public partial class MainWindow : Window
         try
         {
             _wmi = new JiaolongWmi();
+            _wmi.Diagnostic += msg => AddEvent(msg);
             AddEvent("WMI 通道就绪");
         }
         catch (Exception ex)
@@ -225,6 +226,7 @@ public partial class MainWindow : Window
                 : "当前 CPU / BIOS 使用 Windows 电源限频";
             SetCpuDraft(SavedCpuProfile);
             TurboSwitch.IsChecked = _cfg.TurboDisabled;
+            ModeFreqLinkSwitch.IsChecked = _cfg.LinkFrequencyToMode;
             SafetyBox.Text = _cfg.SafetyTempC.ToString(CultureInfo.InvariantCulture);
             IntervalBox.Text = _cfg.RefreshSeconds.ToString(CultureInfo.InvariantCulture);
             OsdSwitch.IsChecked = _cfg.OsdOn;
@@ -250,7 +252,12 @@ public partial class MainWindow : Window
             catch (Exception ex) { AddEvent("恢复睿频设置失败: " + OneLine(ex.Message)); }
             RestoreCpuTrialAware();
 
-            if (_wmi is null) { AddEvent("WMI 不可用，跳过固件项恢复"); return; }
+            if (_wmi is null)
+            {
+                HighlightQuickFrequency();
+                AddEvent("WMI 不可用，跳过固件项恢复");
+                return;
+            }
 
             // ---- firmware ---------------------------------------------------
             try
@@ -264,6 +271,8 @@ public partial class MainWindow : Window
                     HighlightMode(_cfg.PerformanceMode);
                     AddEvent($"恢复性能模式 -> {ModeName(_cfg.PerformanceMode)}");
                 }
+                if (_currentMode >= 0 && !_cfg.MaxFrequencyByMode.ContainsKey(_currentMode))
+                    _cfg.MaxFrequencyByMode[_currentMode] = SavedCpuProfile.EffectiveLimit;
 
                 ApplySwitch(WmiCommand.TPLock, TpSwitch, _cfg.TouchLock, "触摸板锁定");
                 ApplySwitch(WmiCommand.GPUMode, DgpuSwitch, _cfg.DgpuDirect, "独显直连");
@@ -299,6 +308,8 @@ public partial class MainWindow : Window
             else if (_cfg.ColorLoop == 2) { SetChecked(BreathSwitch, true); StartColorLoop(2); }
 
             UpdateOwnerPill();
+            UpdateModeNote();
+            HighlightQuickFrequency();
         }
         finally { _syncing = false; }
 
@@ -324,6 +335,7 @@ public partial class MainWindow : Window
     private void SyncCfgFromUi()
     {
         _cfg.TurboDisabled = TurboSwitch.IsChecked == true;
+        _cfg.LinkFrequencyToMode = ModeFreqLinkSwitch.IsChecked == true;
         _cfg.SafetyTempC = Safety();
         _cfg.OsdOn = OsdSwitch.IsChecked == true;
         _cfg.LightTheme = _isLight;
@@ -336,8 +348,6 @@ public partial class MainWindow : Window
         _cfg.AutoStart = AutoStartSwitch.IsChecked == true;
         _cfg.MinimizeToTrayOnClose = TrayCloseSwitch.IsChecked == true;
         _cfg.FanLowerRpm = _fan is { Owner: FanOwner.Manual } ? _fan.LockedRpm : 0;
-        if (_currentMode >= 0 && _fanUpperCurrent >= 1800)
-            _cfg.FanUpperRpmByMode[_currentMode] = _fanUpperCurrent;
     }
 
     private int ReadUpperBound()
@@ -385,6 +395,7 @@ public partial class MainWindow : Window
             _cfg.FanUpperRpmByMode.Remove(_currentMode);
             AddEvent($"转速上限已跟随模式默认（当前 {ReadUpperBound()} RPM）");
             FanUpperBox.Text = "0";
+            UpdateModeNote();
             return;
         }
 
@@ -402,6 +413,7 @@ public partial class MainWindow : Window
             _fanUpperCurrent = v;
             if (_currentMode >= 0) _cfg.FanUpperRpmByMode[_currentMode] = v;
             FanUpperBox.Text = v.ToString(CultureInfo.InvariantCulture);
+            UpdateModeNote();
             AddEvent($"转速上限 = {v} RPM（回读 {ReadUpperBound()}）");
         }
         catch (Exception ex) { AddEvent("设置转速上限失败: " + OneLine(ex.Message)); }
@@ -436,15 +448,43 @@ public partial class MainWindow : Window
 
     private async Task CollectLoopAsync(CancellationToken ct)
     {
+        string? lastPollError = null;
+        DateTime lastPollErrorUtc = DateTime.MinValue;
+
         while (!ct.IsCancellationRequested)
         {
             try
             {
-                CollectOnce();
+                Exception? wmiError = CollectOnce();
+                if (wmiError is not null)
+                {
+                    string msg = OneLine(wmiError.Message);
+                    DateTime now = DateTime.UtcNow;
+                    if (!string.Equals(msg, lastPollError, StringComparison.Ordinal)
+                        || (now - lastPollErrorUtc).TotalSeconds >= 30)
+                    {
+                        lastPollError = msg;
+                        lastPollErrorUtc = now;
+                        await Dispatcher.InvokeAsync(() => AddEvent("WMI 轮询异常: " + msg));
+                    }
+                }
+                else if (lastPollError is not null)
+                {
+                    lastPollError = null;
+                    await Dispatcher.InvokeAsync(() => AddEvent("WMI 轮询已恢复"));
+                }
             }
             catch (Exception ex)
             {
-                await Dispatcher.InvokeAsync(() => AddEvent("轮询出错: " + OneLine(ex.Message)));
+                string msg = OneLine(ex.Message);
+                DateTime now = DateTime.UtcNow;
+                if (!string.Equals(msg, lastPollError, StringComparison.Ordinal)
+                    || (now - lastPollErrorUtc).TotalSeconds >= 30)
+                {
+                    lastPollError = msg;
+                    lastPollErrorUtc = now;
+                    await Dispatcher.InvokeAsync(() => AddEvent("轮询出错: " + msg));
+                }
             }
 
             try { await Dispatcher.InvokeAsync(ApplyUi); } catch { /* window may be closing */ }
@@ -455,17 +495,26 @@ public partial class MainWindow : Window
     }
 
     /// <summary>Background thread: every call that can block lives here.</summary>
-    private void CollectOnce()
+    private Exception? CollectOnce()
     {
+        Exception? wmiError = null;
         if (_wmi is not null)
         {
-            var (cpu, gpu) = _wmi.ReadFanRpm();
-            _rpmCpu = cpu;
-            _rpmGpu = gpu;
-            _cpuTemp = _wmi.ReadCpuTemp();
+            try
+            {
+                var (cpu, gpu) = _wmi.ReadFanRpm();
+                _rpmCpu = cpu;
+                _rpmGpu = gpu;
+                _cpuTemp = _wmi.ReadCpuTemp();
+            }
+            catch (Exception ex)
+            {
+                wmiError = ex;
+            }
         }
         _sensors?.Poll();
         _sensors?.PushHistory(_cpuTemp);
+        return wmiError;
     }
 
     /// <summary>UI thread: only writes cached values, never blocks.</summary>
@@ -564,7 +613,11 @@ public partial class MainWindow : Window
             OwnerPill.Text = "BIOS 自动";
             OwnerPill.Foreground = new SolidColorBrush(Color.FromRgb(0x34, 0xC7, 0x59));
             FanNote.Text = curve
-                ? $"温度曲线已挂起：CPU {_fan.LastTempC}℃，等降温到 {(_fan.SafetyTempC - 5)}℃ 以下自动恢复"
+                ? _fan.IsTempFaultPaused
+                    ? "温度曲线暂交 BIOS：温度读数异常，恢复后自动接管"
+                    : _fan.LastTempC < 0
+                        ? "温度曲线待命：等待温度读数"
+                        : $"温度曲线已挂起：CPU {_fan.LastTempC}℃，等降温到 {(_fan.SafetyTempC - _fan.SafetyHysteresisC)}℃ 以下自动恢复"
                 : "风扇控制权已交还主板 BIOS 智能控温曲线";
         }
     }
@@ -747,6 +800,15 @@ public partial class MainWindow : Window
         SetMode(mode);
     }
 
+    private void ModeFreqLink_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_syncing) return;
+        _cfg.LinkFrequencyToMode = ModeFreqLinkSwitch.IsChecked == true;
+        UpdateModeNote();
+        AddEvent(_cfg.LinkFrequencyToMode ? "已开启：切换性能模式联动 CPU 频率" : "已关闭：切换性能模式不再改动 CPU 频率");
+        PersistIfChanged();
+    }
+
     private void SetMode(byte mode)
     {
         if (_syncing || _wmi is null) return;
@@ -754,8 +816,33 @@ public partial class MainWindow : Window
         {
             _wmi.Set(WmiCommand.SystemPerMode, mode);
             HighlightMode(mode);
-            AddEvent($"性能模式 -> {ModeName(mode)}");
-            Toast(ModeName(mode) + "模式");
+
+            _fanUpperCurrent = ReadUpperBound();
+            if (_cfg.FanUpperRpmByMode.TryGetValue(mode, out int savedUpper) && savedUpper >= 1800)
+            {
+                _fanUpperCurrent = savedUpper;
+                _wmi.Set(WmiCommand.MaxFanSpeed, (byte)(savedUpper / 100));
+            }
+            FanUpperBox.Text = _fanUpperCurrent.ToString(CultureInfo.InvariantCulture);
+
+            string freqSuffix = "";
+            if (_cfg.LinkFrequencyToMode && _cpuTrial is null && !_cpuRecoveryBlocked)
+            {
+                int targetMhz = GetFrequencyForMode(mode);
+                if (targetMhz != SavedCpuProfile.EffectiveLimit || !_savedCpuProfileApplied)
+                {
+                    if (ApplyQuickFrequency(targetMhz, fromModeSwitch: true))
+                        freqSuffix = targetMhz > 0 ? $" · {targetMhz} MHz" : " · 不限频";
+                }
+                else
+                {
+                    freqSuffix = targetMhz > 0 ? $" · {targetMhz} MHz" : " · 不限频";
+                }
+            }
+
+            UpdateModeNote();
+            AddEvent($"性能模式 -> {ModeName(mode)}{freqSuffix}");
+            Toast(ModeName(mode) + "模式" + freqSuffix);
             PersistIfChanged();
         }
         catch (Exception ex) { AddEvent("切换模式失败: " + OneLine(ex.Message)); }
@@ -790,13 +877,28 @@ public partial class MainWindow : Window
         ModeBurst.Foreground = mode == 1 ? Brushes.White : text;
         ModeGame.Foreground = mode == 0 ? Brushes.White : text;
         ModeQuiet.Foreground = mode == 2 ? Brushes.White : text;
-        ModeNote.Text = mode switch
+        UpdateModeNote();
+    }
+
+    private void UpdateModeNote()
+    {
+        if (_currentMode < 0)
         {
-            1 => "狂飙 · 风扇上限 5000 RPM",
-            0 => "游戏 · 风扇上限 5000 RPM",
-            2 => "办公 · 风扇上限 2700 RPM",
-            _ => "",
-        };
+            ModeNote.Text = "";
+            return;
+        }
+
+        int upper = _fanUpperCurrent > 0 ? _fanUpperCurrent : (_currentMode == 2 ? 2700 : 5000);
+        if (_cfg.LinkFrequencyToMode)
+        {
+            int modeFreq = GetFrequencyForMode(_currentMode);
+            string freqText = modeFreq > 0 ? $"{modeFreq} MHz" : "不限频";
+            ModeNote.Text = $"{ModeName(_currentMode)} · {freqText} · 风扇上限 {upper} RPM";
+        }
+        else
+        {
+            ModeNote.Text = $"{ModeName(_currentMode)} · 风扇上限 {upper} RPM";
+        }
     }
 
     private static string ModeName(int m) => m switch { 1 => "狂飙", 0 => "游戏", 2 => "办公", _ => m.ToString() };
@@ -855,6 +957,7 @@ public partial class MainWindow : Window
         _isLight = !_isLight;
         ApplyTheme(_isLight);
         if (_currentMode >= 0) HighlightMode(_currentMode);   // refresh the active pill colour
+        HighlightQuickFrequency();
         ThemeGlyph.Text = _isLight ? "\uE706" : "\uE708";   // sun : moon
         AddEvent(_isLight ? "已切换到浅色" : "已切换到深色");
     }
@@ -1187,7 +1290,7 @@ public partial class MainWindow : Window
         var ct = _colorCts.Token;
         SetStaticMode(log: false);   // firmware must be in fixed mode to render our animated colours
         _ = Task.Run(() => ColorLoopAsync(kind, ct));
-        AddEvent(kind == 1 ? "彩虹循环已启动 · 10 FPS" : "呼吸效果已启动 · 5s 周期");
+        AddEvent(kind == 1 ? "彩虹循环已启动 · 5 FPS" : "呼吸效果已启动 · 5s 周期");
     }
 
     private void StopColorLoop(bool silent = false)
@@ -1223,7 +1326,7 @@ public partial class MainWindow : Window
             if (kind == 1)
             {
                 rgb = Pack(HsvToRgb(hue, 1, 1));
-                hue += 6;                                  // 6°/frame @10 fps -> 6 s per full cycle
+                hue += 12;                                 // 12°/frame @5 fps -> 6 s per full cycle
                 if (hue >= 360) hue -= 360;
             }
             else
@@ -1233,6 +1336,7 @@ public partial class MainWindow : Window
                 rgb = ScaleRgb(baseRgb, k);
             }
 
+            int delayMs = 200;
             try
             {
                 _wmi?.Set(WmiCommand.RGBKeyboardColor,
@@ -1242,10 +1346,11 @@ public partial class MainWindow : Window
             }
             catch
             {
-                // bridge busy or already torn down - keep the loop alive, it recovers
+                // bridge busy or recovering - back off instead of hammering every frame
+                delayMs = 1000;
             }
 
-            try { await Task.Delay(100, ct); }
+            try { await Task.Delay(delayMs, ct); }
             catch (OperationCanceledException) { break; }
         }
     }

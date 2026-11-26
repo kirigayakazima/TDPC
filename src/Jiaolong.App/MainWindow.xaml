@@ -375,6 +375,14 @@
             <MenuItem Header="⚡  狂飙模式 (5000 RPM)" Click="TrayModeBurst_Click" />
             <MenuItem Header="🎮  游戏模式 (5000 RPM)" Click="TrayModeGame_Click" />
             <MenuItem Header="🍃  办公模式 (2700 RPM)" Click="TrayModeQuiet_Click" />
+            <MenuItem Header="🚀  快捷切频">
+                <MenuItem Header="4200 MHz（静音）" Tag="4200" Click="TrayQuickFreq_Click" />
+                <MenuItem Header="4500 MHz（甜点）" Tag="4500" Click="TrayQuickFreq_Click" />
+                <MenuItem Header="4800 MHz（进阶）" Tag="4800" Click="TrayQuickFreq_Click" />
+                <MenuItem Header="5000 MHz（满血）" Tag="5000" Click="TrayQuickFreq_Click" />
+                <Separator />
+                <MenuItem Header="不限频" Tag="0" Click="TrayQuickFreq_Click" />
+            </MenuItem>
             <Separator />
             <MenuItem Header="🌀  交还 BIOS 托管风扇" Click="TrayReleaseFan_Click" />
             <Separator />
@@ -583,6 +591,25 @@
                                         </TextBlock>
                                     </StackPanel>
                                 </Border>
+                                <StackPanel x:Name="CpuQuickFreqSection" Margin="0,0,0,14">
+                                    <DockPanel Margin="0,0,0,6">
+                                        <TextBlock Text="快捷切频" FontWeight="SemiBold" FontSize="12"
+                                                   Foreground="{DynamicResource SectionText}" VerticalAlignment="Center" />
+                                        <TextBlock Text="点选立即生效，不改变性能模式" FontSize="10.5"
+                                                   Foreground="{DynamicResource SubtitleText}" HorizontalAlignment="Right"
+                                                   DockPanel.Dock="Right" VerticalAlignment="Center" />
+                                    </DockPanel>
+                                    <Border Background="{DynamicResource SegBg}" CornerRadius="10" Padding="3"
+                                            BorderBrush="{DynamicResource PanelBorder}" BorderThickness="1">
+                                        <UniformGrid x:Name="CpuQuickFreqBar" Columns="5">
+                                            <Button x:Name="QuickFreq4200" Content="4200" Tag="4200" Style="{StaticResource Btn}" Click="QuickFreq_Click" Height="30" Padding="0" FontSize="12" Margin="1" />
+                                            <Button x:Name="QuickFreq4500" Content="4500" Tag="4500" Style="{StaticResource Btn}" Click="QuickFreq_Click" Height="30" Padding="0" FontSize="12" Margin="1" />
+                                            <Button x:Name="QuickFreq4800" Content="4800" Tag="4800" Style="{StaticResource Btn}" Click="QuickFreq_Click" Height="30" Padding="0" FontSize="12" Margin="1" />
+                                            <Button x:Name="QuickFreq5000" Content="5000" Tag="5000" Style="{StaticResource Btn}" Click="QuickFreq_Click" Height="30" Padding="0" FontSize="12" Margin="1" />
+                                            <Button x:Name="QuickFreqOff"  Content="不限"  Tag="0"    Style="{StaticResource Btn}" Click="QuickFreq_Click" Height="30" Padding="0" FontSize="12" Margin="1" />
+                                        </UniformGrid>
+                                    </Border>
+                                </StackPanel>
                                 <Grid x:Name="CpuDraftPanel">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="*" />
@@ -958,6 +985,14 @@
                                         <Button x:Name="ModeQuiet" Content="办公" Style="{StaticResource Btn}" Click="Mode_Click" Tag="2" Height="34" Margin="1" />
                                     </UniformGrid>
                                 </Border>
+                                <DockPanel Margin="2,10,2,0">
+                                    <TextBlock Text="切模式联动 CPU 频率" Style="{StaticResource Label}" FontSize="11.5"
+                                               Foreground="{DynamicResource SubtitleText}" VerticalAlignment="Center"
+                                               ToolTip="开启后切换狂飙/游戏/办公会自动应用该模式记住的频率上限；任何模式下都可随时用左侧快捷切频单独覆盖" />
+                                    <ToggleButton x:Name="ModeFreqLinkSwitch" DockPanel.Dock="Right" HorizontalAlignment="Right"
+                                                  Style="{StaticResource Switch}" Checked="ModeFreqLink_Changed" Unchecked="ModeFreqLink_Changed"
+                                                  AutomationProperties.Name="切换性能模式时联动 CPU 频率" />
+                                </DockPanel>
                             </StackPanel>
                         </Border>
 

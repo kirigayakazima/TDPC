@@ -5,6 +5,8 @@ using System.IO;
 using System.Security.Cryptography;
 using System.Text.Json;
 using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Media;
 using System.Windows.Threading;
 using Jiaolong.Core.Config;
 using Jiaolong.Core.Smu;
@@ -142,9 +144,10 @@ public partial class MainWindow
         try
         {
             trial.Candidate.CopyTo(_cfg);
+            if (_currentMode >= 0) _cfg.MaxFrequencyByMode[_currentMode] = trial.Candidate.EffectiveLimit;
             ConfigStore.SaveConfirmed(_cfg);
-            _cpuTrialStore.Finish();
             _lastSavedJson = JsonSerializer.Serialize(_cfg);
+            _cpuTrialStore.Finish();
         }
         catch (Exception ex)
         {
@@ -158,6 +161,7 @@ public partial class MainWindow
         _savedCpuProfileApplied = true;
         AddEvent($"已保留 CPU 试跑配置，{DescribeCpuProfile(trial.Candidate)}");
         UpdateCpuTrialControls("已保留这组设置，下次启动会应用。");
+        UpdateModeNote();
     }
 
     private void RollBackCpuTrial_Click(object sender, RoutedEventArgs e)
@@ -203,6 +207,7 @@ public partial class MainWindow
             UpdateCpuTrialControls(_releaseCoAfterTrial
                 ? $"已结束试跑并关闭 CO。{reason}。"
                 : restore ? $"已回退到已保存配置。{reason}。" : $"试跑已结束，沿用当前配置。{reason}。");
+            UpdateModeNote();
             _releaseCoAfterTrial = false;
         }
         catch (Exception ex)
@@ -335,11 +340,120 @@ public partial class MainWindow
         CoSwitch.IsChecked = profile.CoEnabled;
     }
 
+    private static int DefaultFrequencyForMode(int mode) => mode switch { 1 => 5000, 0 => 4500, 2 => 4200, _ => 4500 };
+
+    private int GetFrequencyForMode(int mode) =>
+        _cfg.MaxFrequencyByMode.TryGetValue(mode, out int saved) ? saved : DefaultFrequencyForMode(mode);
+
+    private void QuickFreq_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: string raw } && int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int mhz))
+            ApplyQuickFrequency(mhz, fromModeSwitch: false);
+    }
+
+    private void TrayQuickFreq_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { Tag: string raw } && int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out int mhz))
+            ApplyQuickFrequency(mhz, fromModeSwitch: false);
+    }
+
+    private bool ApplyQuickFrequency(int mhz, bool fromModeSwitch)
+    {
+        if (_syncing || _cpuTrial is not null || _cpuRecoveryBlocked)
+        {
+            if (!fromModeSwitch) Toast("试跑中或待恢复，暂不可快捷切频");
+            return false;
+        }
+
+        bool useSmu = SavedFrequencyMethodIndex == 0;
+        if (mhz > 0 && useSmu && mhz is < SmuClient.MinBoostLimitMhz or > SmuClient.MaxBoostLimitMhz)
+        {
+            UpdateCpuTrialControls($"频率超出 SMU 适用范围（{SmuClient.MinBoostLimitMhz}–{SmuClient.MaxBoostLimitMhz} MHz）。");
+            return false;
+        }
+
+        if (!ApplyFrequency(useSmu, mhz, strict: true))
+        {
+            UpdateCpuTrialControls("快捷切频未确认，保留原有配置，详情见日志。");
+            return false;
+        }
+
+        _cfg.UseSmuFrequencyLimit = useSmu;
+        if (mhz > 0)
+        {
+            _cfg.MaxFrequencyOn = true;
+            _cfg.MaxFrequencyMhz = mhz;
+        }
+        else
+        {
+            _cfg.MaxFrequencyOn = false;
+        }
+        if (_currentMode >= 0) _cfg.MaxFrequencyByMode[_currentMode] = mhz;
+
+        try
+        {
+            ConfigStore.SaveConfirmed(_cfg);
+            _lastSavedJson = JsonSerializer.Serialize(_cfg);
+        }
+        catch (Exception ex)
+        {
+            AddEvent("保存快捷切频配置失败: " + OneLine(ex.Message));
+        }
+
+        _savedCpuProfileApplied = true;
+        SetCpuDraft(SavedCpuProfile);
+        UpdateCpuTrialControls(mhz > 0
+            ? $"已直接切换并保存：{DescribeCpuProfile(SavedCpuProfile)}"
+            : $"已解除限频并保存：{DescribeCpuProfile(SavedCpuProfile)}");
+        UpdateModeNote();
+        if (!fromModeSwitch) Toast(mhz > 0 ? $"CPU 限频 -> {mhz} MHz" : "CPU 限频已关闭");
+        return true;
+    }
+
+    private void HighlightQuickFrequency()
+    {
+        int activeMhz = _trialClock is not null && _cpuTrial is not null
+            ? _cpuTrial.Candidate.EffectiveLimit
+            : SavedCpuProfile.EffectiveLimit;
+
+        Brush lit = Brushes.Transparent;
+        if (TryFindResource("PrimaryBtnBg") is Brush b)
+        {
+            var c = b.Clone();
+            c.Freeze();
+            lit = c;
+        }
+        else
+        {
+            var fallback = new SolidColorBrush(Color.FromRgb(0x2B, 0x3E, 0x5C));
+            fallback.Freeze();
+            lit = fallback;
+        }
+
+        Brush dim = Brushes.Transparent;
+        Brush text = TryFindResource("RowText") as Brush ?? Brushes.Gainsboro;
+
+        foreach (var (button, mhz) in new[]
+        {
+            (QuickFreq4200, 4200),
+            (QuickFreq4500, 4500),
+            (QuickFreq4800, 4800),
+            (QuickFreq5000, 5000),
+            (QuickFreqOff, 0),
+        })
+        {
+            bool match = activeMhz == mhz;
+            button.Background = match ? lit : dim;
+            button.Foreground = match ? Brushes.White : text;
+        }
+    }
+
     private void UpdateCpuTrialControls(string status)
     {
         bool running = _trialClock is not null;
         bool usingSavedProfile = _cpuTrial?.UsesSavedProfile == true;
         CpuDraftPanel.IsEnabled = !running && !_cpuRecoveryBlocked;
+        CpuQuickFreqBar.IsEnabled = !running && !_cpuRecoveryBlocked && _cpuSelfCheck is null;
         BtnStartCpuTrial.IsEnabled = !running && !_cpuRecoveryBlocked && _cpuSelfCheck is null;
         BtnCpuSelfCheck.IsEnabled = running && _cpuSelfCheck is null;
         BtnSaveCpuTrial.IsEnabled = running && !usingSavedProfile && _cpuSelfCheck is null;
@@ -350,6 +464,7 @@ public partial class MainWindow
         CpuTrialState.SetResourceReference(System.Windows.Controls.TextBlock.ForegroundProperty,
             _cpuRecoveryBlocked ? "Danger" : running ? "Warn" : "NeonEmerald");
         CpuTrialNote.Text = status;
+        HighlightQuickFrequency();
     }
 
     private static string DescribeCpuProfile(CpuTuningProfile profile)

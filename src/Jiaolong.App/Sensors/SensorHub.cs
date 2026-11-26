@@ -1,5 +1,7 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.IO;
+using System.Runtime.InteropServices;
 using Jiaolong.Core.Smu;
 using Jiaolong.Core.Wmi;
 
@@ -73,7 +75,7 @@ public sealed class SensorHub
     public double? GpuPowerW { get; private set; }
     public bool GpuLoadUsesWindowsEngine { get; private set; }
 
-    // memory / disk (WQL, cached - these change slowly so we refresh every 5 s)
+    // memory / disk (Win32 + DriveInfo, cached - these change slowly so we refresh every 5 s)
     public double MemTotalGb { get; private set; }
     public double MemAvailGb { get; private set; }
     public double MemLoadPct { get; private set; }
@@ -110,35 +112,50 @@ public sealed class SensorHub
 
     private void PollMemDisk()
     {
-        if (_wmi is null) return;
         if ((DateTime.UtcNow - _lastMemDiskUtc).TotalMilliseconds < MemDiskCacheMs) return;
         _lastMemDiskUtc = DateTime.UtcNow;
+
         try
         {
-            if (MemTotalGb <= 0)
+            var mem = new MemoryStatusEx { dwLength = (uint)Marshal.SizeOf<MemoryStatusEx>() };
+            if (GlobalMemoryStatusEx(ref mem))
             {
-                var cs = _wmi.Query("SELECT TotalPhysicalMemory FROM Win32_ComputerSystem");
-                if (cs.Length > 0 && ParseNamedRow(cs[0]).TryGetValue("TotalPhysicalMemory", out var tot))
-                    MemTotalGb = Num(tot) / (1024.0 * 1024 * 1024);
-            }
-
-            var os = _wmi.Query("SELECT FreePhysicalMemory FROM Win32_OperatingSystem");
-            if (os.Length > 0 && ParseNamedRow(os[0]).TryGetValue("FreePhysicalMemory", out var freeKb))
-            {
-                MemAvailGb = Num(freeKb) / (1024.0 * 1024);
+                MemTotalGb = mem.ullTotalPhys / (1024.0 * 1024 * 1024);
+                MemAvailGb = mem.ullAvailPhys / (1024.0 * 1024 * 1024);
                 if (MemTotalGb > 0)
                     MemLoadPct = Math.Clamp((MemTotalGb - MemAvailGb) / MemTotalGb * 100.0, 0, 100);
             }
+        }
+        catch (Exception ex) { LastError = "mem: " + ex.Message; }
 
-            var dk = _wmi.Query("SELECT Size,FreeSpace FROM Win32_LogicalDisk WHERE DeviceID='C:'");
-            if (dk.Length > 0)
+        try
+        {
+            var drive = new DriveInfo("C");
+            if (drive.IsReady)
             {
-                var m = ParseNamedRow(dk[0]);
-                if (m.TryGetValue("Size", out var sz)) DiskTotalGb = Num(sz) / (1024.0 * 1024 * 1024);
-                if (m.TryGetValue("FreeSpace", out var fs)) DiskAvailGb = Num(fs) / (1024.0 * 1024 * 1024);
+                DiskTotalGb = drive.TotalSize / (1024.0 * 1024 * 1024);
+                DiskAvailGb = drive.TotalFreeSpace / (1024.0 * 1024 * 1024);
             }
         }
-        catch (Exception ex) { LastError = "mem/disk: " + ex.Message; }
+        catch (Exception ex) { LastError = "disk: " + ex.Message; }
+    }
+
+    [DllImport("kernel32.dll", ExactSpelling = true, SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx lpBuffer);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MemoryStatusEx
+    {
+        public uint dwLength;
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys;
+        public ulong ullAvailPhys;
+        public ulong ullTotalPageFile;
+        public ulong ullAvailPageFile;
+        public ulong ullTotalVirtual;
+        public ulong ullAvailVirtual;
+        public ulong ullAvailExtendedVirtual;
     }
 
     private void PollCpu()

@@ -37,12 +37,16 @@ public sealed record FanEvent(FanEventKind Kind, string Message, DateTime AtUtc)
 /// </summary>
 public sealed class FanController : IDisposable
 {
+    private const int MaxConsecutiveTempErrors = 3;
+
     private readonly EcAccess _ec;
     private readonly JiaolongWmi? _wmi;
     private readonly CancellationTokenSource _cts = new();
     private readonly object _gate = new();
     private Task? _loop;
     private int _lockedRpm;
+    private int _consecutiveTempErrors;
+    private volatile bool _tempFaultPaused;
     private bool _disposed;
 
     /// <summary>
@@ -65,6 +69,8 @@ public sealed class FanController : IDisposable
     public FanOwner Owner { get; private set; } = FanOwner.Bios;
     public int LockedRpm => _lockedRpm;
     public int LastTempC { get; private set; } = -1;
+    public bool IsTempFaultPaused => _tempFaultPaused;
+    public bool IsSafetyLatched { get { lock (_gate) return _safetyLatched; } }
     public string LastStatus { get; private set; } = "starting";
 
     public event Action<FanEvent>? Event;
@@ -79,7 +85,13 @@ public sealed class FanController : IDisposable
     public void Startup()
     {
         _ec.ReleaseToBios();
-        lock (_gate) { Owner = FanOwner.Bios; _lockedRpm = 0; }
+        lock (_gate)
+        {
+            Owner = FanOwner.Bios;
+            _lockedRpm = 0;
+            _consecutiveTempErrors = 0;
+            _tempFaultPaused = false;
+        }
         Raise(FanEventKind.StartupCleared, "released to BIOS (startup hygiene)");
     }
 
@@ -127,6 +139,8 @@ public sealed class FanController : IDisposable
 
             _curve = enable ? curve : null;
             _safetyLatched = false;
+            _consecutiveTempErrors = 0;
+            _tempFaultPaused = false;
             temps = _curve?.Temps;
         }
 
@@ -158,6 +172,8 @@ public sealed class FanController : IDisposable
             _lockedRpm = value * 100;
             Owner = FanOwner.Manual;
             _safetyLatched = false;
+            _consecutiveTempErrors = 0;
+            _tempFaultPaused = false;
         }
         Raise(FanEventKind.Locked, $"locked at {_lockedRpm} RPM");
     }
@@ -178,6 +194,8 @@ public sealed class FanController : IDisposable
             _ec.ReleaseToBios();
             Owner = FanOwner.Bios;
             _lockedRpm = 0;
+            _consecutiveTempErrors = 0;
+            _tempFaultPaused = false;
             if (!wasManual) return;               // releasing a BIOS-owned fan is a no-op
         }
         Raise(FanEventKind.ReleasedByUs, "released to BIOS");
@@ -211,15 +229,74 @@ public sealed class FanController : IDisposable
     {
         byte cpuTarget = _ec.Read16(EcAccess.FanSpeedCpu);
         byte gpuTarget = _ec.Read16(EcAccess.FanSpeedGpu);
-        int temp = _wmi?.ReadCpuTemp() ?? -1;
+
+        int temp = -1;
+        Exception? tempError = null;
+        if (_wmi is not null)
+        {
+            try { temp = _wmi.ReadCpuTemp(); }
+            catch (Exception ex) { tempError = ex; }
+        }
+
+        FanEventKind? pendingKind = null;
+        string? pendingMessage = null;
+
+        if (tempError is not null)
+        {
+            lock (_gate)
+            {
+                _consecutiveTempErrors++;
+                if (_consecutiveTempErrors < MaxConsecutiveTempErrors)
+                {
+                    LastStatus = $"temp read retry ({_consecutiveTempErrors}/{MaxConsecutiveTempErrors}): {tempError.Message}";
+                    return;
+                }
+
+                bool hadCurve = _curve is not null;
+                bool shouldRelease = Owner == FanOwner.Manual || cpuTarget != 0 || gpuTarget != 0;
+                if (shouldRelease)
+                {
+                    _ec.ReleaseToBios();
+                }
+                Owner = FanOwner.Bios;
+                _lockedRpm = 0;
+                LastTempC = -1;
+
+                if (!_tempFaultPaused)
+                {
+                    _tempFaultPaused = true;
+                    pendingKind = FanEventKind.WatchdogError;
+                    pendingMessage = hadCurve
+                        ? $"连续 {_consecutiveTempErrors} 次读取温度失败（{tempError.Message}），已暂交 BIOS，温度恢复后自动接管曲线"
+                        : $"连续 {_consecutiveTempErrors} 次读取温度失败（{tempError.Message}），已交还 BIOS";
+                }
+                LastStatus = "temp fault paused (BIOS auto)";
+            }
+
+            if (pendingKind is { } kind && pendingMessage is not null)
+                Raise(kind, pendingMessage);
+            return;
+        }
+
         LastTempC = temp;
 
         lock (_gate)
         {
+            _consecutiveTempErrors = 0;
+            if (_tempFaultPaused)
+            {
+                _tempFaultPaused = false;
+                if (_curve is not null)
+                {
+                    pendingKind = FanEventKind.Locked;
+                    pendingMessage = "温度读数已恢复，温度曲线重新接管";
+                }
+            }
+
             // 0) temperature curve owns the fan while enabled: write interpolated target every tick
             if (_curve is not null)
             {
-                if (temp < 0) { LastStatus = "curve: waiting for temperature"; return; }
+                if (temp < 0) { LastStatus = "curve: waiting for temperature"; goto AfterLock; }
 
                 // the safety valve still wins, with hysteresis so the two never oscillate
                 if (SafetyTempC > 0 && temp >= SafetyTempC)
@@ -230,18 +307,18 @@ public sealed class FanController : IDisposable
                         Owner = FanOwner.Bios;
                         _lockedRpm = 0;
                         _safetyLatched = true;
-                        Raise(FanEventKind.SafetyValve,
-                            $"CPU {temp}℃ >= {SafetyTempC}℃，温度曲线暂停并交还 BIOS");
+                        pendingKind = FanEventKind.SafetyValve;
+                        pendingMessage = $"CPU {temp}℃ >= {SafetyTempC}℃，温度曲线暂停并交还 BIOS";
                     }
                     LastStatus = $"curve paused (CPU {temp}℃)";
-                    return;
+                    goto AfterLock;
                 }
                 if (_safetyLatched)
                 {
                     if (temp >= SafetyTempC - SafetyHysteresisC)
                     {
                         LastStatus = $"curve waiting to cool (CPU {temp}℃)";
-                        return;
+                        goto AfterLock;
                     }
                     _safetyLatched = false;
                 }
@@ -252,7 +329,7 @@ public sealed class FanController : IDisposable
                 _lockedRpm = hundreds * 100;
                 Owner = FanOwner.Manual;
                 LastStatus = $"curve {temp}℃ -> {_lockedRpm} RPM";
-                return;
+                goto AfterLock;
             }
 
             if (Owner == FanOwner.Manual)
@@ -264,10 +341,10 @@ public sealed class FanController : IDisposable
                     Owner = FanOwner.Bios;
                     _lockedRpm = 0;
                     _safetyLatched = true;
-                    Raise(FanEventKind.SafetyValve,
-                        $"CPU {temp}℃ >= {SafetyTempC}℃，已交还 BIOS（降温 {SafetyHysteresisC}℃ 后才允许重新锁定）");
+                    pendingKind = FanEventKind.SafetyValve;
+                    pendingMessage = $"CPU {temp}℃ >= {SafetyTempC}℃，已交还 BIOS（降温 {SafetyHysteresisC}℃ 后才允许重新锁定）";
                     LastStatus = $"safety valve (CPU {temp}℃)";
-                    return;
+                    goto AfterLock;
                 }
 
                 if (SafetyTempC > 0 && temp < SafetyTempC - SafetyHysteresisC)
@@ -278,10 +355,10 @@ public sealed class FanController : IDisposable
                 {
                     Owner = FanOwner.Bios;
                     _lockedRpm = 0;
-                    Raise(FanEventKind.ReleasedExternally,
-                        "EC targets cleared by another program; adopted BIOS ownership");
+                    pendingKind = FanEventKind.ReleasedExternally;
+                    pendingMessage = "EC targets cleared by another program; adopted BIOS ownership";
                     LastStatus = "released externally";
-                    return;
+                    goto AfterLock;
                 }
 
                 // 2) our write is still in effect
@@ -293,12 +370,17 @@ public sealed class FanController : IDisposable
                 {
                     Owner = FanOwner.Manual;
                     _lockedRpm = cpuTarget * 100;
-                    Raise(FanEventKind.Locked,
-                        $"another program pinned the fans to {_lockedRpm} RPM; adopting");
+                    pendingKind = FanEventKind.Locked;
+                    pendingMessage = $"another program pinned the fans to {_lockedRpm} RPM; adopting";
                 }
                 LastStatus = $"BIOS auto, CPU {temp}C";
             }
+
+        AfterLock:;
         }
+
+        if (pendingKind is { } evKind && pendingMessage is not null)
+            Raise(evKind, pendingMessage);
     }
 
     private void Raise(FanEventKind kind, string message) =>

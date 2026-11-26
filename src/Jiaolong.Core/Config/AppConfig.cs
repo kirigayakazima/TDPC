@@ -36,6 +36,10 @@ public sealed class AppConfig
     public bool MaxFrequencyOn { get; set; } = true;
     /// <summary>Null selects SMU on the validated platform, Windows elsewhere.</summary>
     public bool? UseSmuFrequencyLimit { get; set; }
+    /// <summary>Per-performance-mode CPU frequency cap in MHz (mode -> MHz; 0 = unlimited).</summary>
+    public Dictionary<int, int> MaxFrequencyByMode { get; set; } = new();
+    /// <summary>When true, switching performance modes applies that mode's saved frequency cap.</summary>
+    public bool LinkFrequencyToMode { get; set; } = true;
     public bool TurboDisabled { get; set; }
 
     /// <summary>Curve Optimiser offset, -50..0 (negative = undervolt). 0 = off.</summary>
@@ -187,6 +191,15 @@ public static class AppConfigExtensions
             int v = c.FanUpperRpmByMode[key];
             if (v is < 1800 or > 5800) c.FanUpperRpmByMode.Remove(key);
             else c.FanUpperRpmByMode[key] = v - v % 100;
+        }
+
+        c.MaxFrequencyByMode ??= new Dictionary<int, int>();
+        foreach (var key in c.MaxFrequencyByMode.Keys.ToList())
+        {
+            if (key is < 0 or > 2) { c.MaxFrequencyByMode.Remove(key); continue; }
+            int f = c.MaxFrequencyByMode[key];
+            if (f < 0 || f > 9000 || (f > 0 && f < 1500))
+                c.MaxFrequencyByMode.Remove(key);
         }
     }
 }

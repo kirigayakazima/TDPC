@@ -52,6 +52,12 @@ public sealed class JiaolongWmi : IDisposable
 {
     private readonly PowerShellWmi _inner;
 
+    public event Action<string>? Diagnostic
+    {
+        add => _inner.Diagnostic += value;
+        remove => _inner.Diagnostic -= value;
+    }
+
     public JiaolongWmi(string? bridgeScriptPath = null) =>
         _inner = new PowerShellWmi(bridgeScriptPath);
 
